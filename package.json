@@ -1,0 +1,27 @@
+{
+  "name": "lecturemind",
+  "private": true,
+  "version": "1.0.0",
+  "description": "LectureMind — AI-Powered Audio-to-Mindmap Generator",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@phosphor-icons/react": "^2.1.10",
+    "d3": "^7.9.0",
+    "firebase": "^12.18.0",
+    "markmap-lib": "^0.18.12",
+    "markmap-view": "^0.18.12",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
+    "@vitejs/plugin-react": "^6.0.5",
+    "tailwindcss": "^4.3.3",
+    "vite": "^8.2.1"
+  }
+}

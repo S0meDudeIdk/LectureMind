@@ -1,0 +1,61 @@
+@import "tailwindcss";
+
+/* ── Tailwind v4: CSS-first design tokens (NO tailwind.config.js) ── */
+@theme {
+  --color-primary: #4F46E5;          /* Indigo 600 */
+  --color-primary-light: #818CF8;    /* Indigo 400 */
+  --color-surface: #0F172A;          /* Slate 900 */
+  --color-surface-alt: #1E293B;      /* Slate 800 */
+  --color-surface-overlay: #334155;  /* Slate 700 */
+  --color-accent: #06B6D4;           /* Cyan 500 */
+  --color-accent-light: #22D3EE;     /* Cyan 400 */
+  --color-text: #F1F5F9;             /* Slate 100 */
+  --color-text-muted: #94A3B8;       /* Slate 400 */
+  --color-border: #334155;           /* Slate 700 */
+  --color-danger: #EF4444;           /* Red 500 */
+
+  --font-sans: 'Inter', ui-sans-serif, system-ui, sans-serif;
+
+  --radius-sm: 0.5rem;
+  --radius-md: 0.75rem;
+  --radius-lg: 1rem;
+  --radius-xl: 1.5rem;
+}
+
+/* ── Global base styles ── */
+body {
+  font-family: var(--font-sans);
+  background-color: var(--color-surface);
+  color: var(--color-text);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ── Scrollbar styling ── */
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-surface-overlay);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-muted);
+}
+
+/* ── Markmap SVG overrides ── */
+.markmap-node text {
+  fill: var(--color-text) !important;
+  font-family: var(--font-sans) !important;
+  font-size: 14px !important;
+}
+
+.markmap-link {
+  stroke-opacity: 0.4 !important;
+}
