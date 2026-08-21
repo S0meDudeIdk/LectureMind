@@ -1,9 +1,13 @@
 import { FileAudio, DotsThree } from '@phosphor-icons/react';
 
-export default function LectureCard({ title, date, duration, active }) {
+export default function LectureCard({ title, date, duration, active, onClick }) {
   return (
-    <button 
-      className={`w-full text-left p-3 rounded-lg border transition-all ${
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={onClick}
+      onKeyDown={(e) => e.key === 'Enter' && onClick?.()}
+      className={`w-full text-left p-3 rounded-lg border transition-all cursor-pointer ${
         active 
           ? 'bg-surface-overlay border-primary/50 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]' 
           : 'bg-surface-alt border-border/50 hover:bg-surface-overlay hover:border-border'
@@ -16,7 +20,11 @@ export default function LectureCard({ title, date, duration, active }) {
             {title}
           </h3>
         </div>
-        <button className="text-text-muted hover:text-text shrink-0">
+        <button
+          className="text-text-muted hover:text-text shrink-0"
+          onClick={(e) => e.stopPropagation()}
+          aria-label="More options"
+        >
           <DotsThree size={16} weight="bold" />
         </button>
       </div>
@@ -25,6 +33,6 @@ export default function LectureCard({ title, date, duration, active }) {
         <span>&middot;</span>
         <span>{duration}</span>
       </div>
-    </button>
+    </div>
   );
 }
