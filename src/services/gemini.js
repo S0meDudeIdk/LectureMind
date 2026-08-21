@@ -3,21 +3,17 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 const API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
 const genAI = new GoogleGenerativeAI(API_KEY);
 
-// 1. Fallback models ordered by preference (includes 3.x, 2.x, 1.5.x flash and pro tiers)
+// 1. Fallback models ordered by preference
 export const FALLBACK_MODELS = [
-  'gemini-3.7-flash',
   'gemini-3.6-flash',
+  'gemini-3.7-flash',
   'gemini-3.5-flash',
-  'gemini-3.5-pro',
   'gemini-3.1-pro',
-  'gemini-2.5-flash',
-  'gemini-2.0-flash',
-  'gemini-2.0-flash-lite',
   'gemini-1.5-flash',
-  'gemini-1.5-flash-8b',
-  'gemini-2.0-pro-exp-02-05',
-  'gemini-1.5-pro',
 ];
+
+
+
 
 
 

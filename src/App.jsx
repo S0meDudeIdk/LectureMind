@@ -8,63 +8,30 @@ import ExportButton from './components/ExportButton';
 import ErrorBanner from './components/ErrorBanner';
 import { useAudioUpload } from './hooks/useAudioUpload';
 
-// Mock data for sidebar with pre-populated mindmap markdown for instant testing
-const MOCK_LECTURES = [
-  { 
-    id: '1', 
-    title: 'Introduction to Quantum Computing', 
-    date: 'Today', 
-    duration: '45:20',
-    markdown: `# Quantum Computing
-## Fundamental Principles
-- Superposition states
-- Quantum entanglement
-- Interference patterns
-## Quantum Hardware
-- Superconducting qubits
-- Trapped ion systems
-- Photonic circuits
-## Key Algorithms
-- Shor factoring algorithm
-- Grover search method
-- Quantum Fourier transform
-## Practical Applications
-- Cryptographic security
-- Molecular simulation
-- Financial modeling`
-  },
-  { 
-    id: '2', 
-    title: 'Machine Learning Ethics', 
-    date: 'Yesterday', 
-    duration: '1:12:05',
-    markdown: `# Machine Learning Ethics
-## Algorithmic Bias
-- Training data disparity
-- Historical prejudice
-- Feedback loops
-## Privacy & Security
-- Model inversion attacks
-- Differential privacy
-- Federated learning
-## Governance Models
-- Regulatory frameworks
-- Audit standards
-- Explainability tools`
-  },
-];
-
 export default function App() {
+
   const [activeLectureId, setActiveLectureId] = useState(null);
   const [customMarkdown, setCustomMarkdown] = useState("");
-  const { processAudio, isProcessing, progressMsg, error, markdown: uploadedMarkdown, reset } = useAudioUpload();
+  const { 
+    processAudio, 
+    isProcessing, 
+    progressMsg, 
+    error, 
+    markdown: uploadedMarkdown, 
+    savedMindmap,
+    reset 
+  } = useAudioUpload();
 
   const activeMarkdown = customMarkdown || uploadedMarkdown;
 
-  const handleFileSelect = (file) => {
+  const handleFileSelect = async (file) => {
     setCustomMarkdown("");
-    processAudio(file);
     setActiveLectureId('new');
+    try {
+      await processAudio(file);
+    } catch {
+      // Error handled by hook
+    }
   };
 
   const handleLectureSelect = (lec) => {
@@ -78,14 +45,31 @@ export default function App() {
     reset();
   };
 
+
+  const handleRenameLecture = (id, newTitle) => {
+    if (id === activeLectureId && activeMarkdown) {
+      const updatedMd = activeMarkdown.replace(/^#\s+(.+)$/m, `# ${newTitle}`);
+      setCustomMarkdown(updatedMd);
+    }
+  };
+
+  const handleDeleteLecture = (id) => {
+    if (id === activeLectureId) {
+      handleNew();
+    }
+  };
+
   const sidebar = (
     <Sidebar 
-      lectures={MOCK_LECTURES} 
       activeId={activeLectureId}
       onNew={handleNew}
       onSelectLecture={handleLectureSelect}
+      onRenameLecture={handleRenameLecture}
+      onDeleteLecture={handleDeleteLecture}
     />
   );
+
+
 
 
   return (
