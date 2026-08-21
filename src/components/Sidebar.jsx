@@ -1,7 +1,7 @@
 import { Plus, MagnifyingGlass } from '@phosphor-icons/react';
 import LectureCard from './LectureCard';
 
-export default function Sidebar({ lectures, activeId, onNew }) {
+export default function Sidebar({ lectures, activeId, onNew, onSelectLecture }) {
   return (
     <aside className="w-64 border-r border-border bg-surface-alt/30 flex flex-col h-full shrink-0">
       <div className="p-4 border-b border-border/50 space-y-4">
@@ -35,6 +35,7 @@ export default function Sidebar({ lectures, activeId, onNew }) {
               key={lec.id} 
               {...lec} 
               active={lec.id === activeId} 
+              onClick={() => onSelectLecture?.(lec)}
             />
           ))
         )}
@@ -42,3 +43,4 @@ export default function Sidebar({ lectures, activeId, onNew }) {
     </aside>
   );
 }
+

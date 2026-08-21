@@ -1,25 +1,46 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
 @import "tailwindcss";
 
-/* ── Tailwind v4: CSS-first design tokens (NO tailwind.config.js) ── */
+/* ── Tailwind v4: CSS-first design tokens ── */
 @theme {
-  --color-primary: #4F46E5;          /* Indigo 600 */
-  --color-primary-light: #818CF8;    /* Indigo 400 */
-  --color-surface: #0F172A;          /* Slate 900 */
-  --color-surface-alt: #1E293B;      /* Slate 800 */
-  --color-surface-overlay: #334155;  /* Slate 700 */
-  --color-accent: #06B6D4;           /* Cyan 500 */
-  --color-accent-light: #22D3EE;     /* Cyan 400 */
-  --color-text: #F1F5F9;             /* Slate 100 */
-  --color-text-muted: #94A3B8;       /* Slate 400 */
-  --color-border: #334155;           /* Slate 700 */
-  --color-danger: #EF4444;           /* Red 500 */
-
   --font-sans: 'Inter', ui-sans-serif, system-ui, sans-serif;
-
   --radius-sm: 0.5rem;
   --radius-md: 0.75rem;
   --radius-lg: 1rem;
   --radius-xl: 1.5rem;
+
+  /* Brand (theme-invariant) */
+  --color-primary: #4F46E5;
+  --color-primary-light: #818CF8;
+  --color-accent: #06B6D4;
+  --color-accent-light: #22D3EE;
+  --color-danger: #EF4444;
+}
+
+/* ── Dark mode tokens (default) ── */
+:root {
+  --color-surface: #0F172A;
+  --color-surface-alt: #1E293B;
+  --color-surface-overlay: #334155;
+  --color-text: #F1F5F9;
+  --color-text-muted: #94A3B8;
+  --color-border: #334155;
+  --lm-node-text: #F8FAFC;
+  --lm-node-bg: rgba(30, 41, 59, 0.85);
+  --lm-node-border: rgba(100, 116, 139, 0.6);
+}
+
+/* ── Light mode tokens ── */
+:root.light {
+  --color-surface: #F8FAFC;
+  --color-surface-alt: #F1F5F9;
+  --color-surface-overlay: #E2E8F0;
+  --color-text: #0F172A;
+  --color-text-muted: #64748B;
+  --color-border: #CBD5E1;
+  --lm-node-text: #0F172A;
+  --lm-node-bg: rgba(241, 245, 249, 0.95);
+  --lm-node-border: rgba(203, 213, 225, 0.85);
 }
 
 /* ── Global base styles ── */
@@ -29,33 +50,94 @@ body {
   color: var(--color-text);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  transition: background-color 0.2s ease, color 0.2s ease;
 }
 
 /* ── Scrollbar styling ── */
-::-webkit-scrollbar {
-  width: 6px;
-}
-
-::-webkit-scrollbar-track {
-  background: transparent;
-}
-
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb {
   background: var(--color-surface-overlay);
   border-radius: 3px;
 }
+::-webkit-scrollbar-thumb:hover { background: var(--color-text-muted); }
 
-::-webkit-scrollbar-thumb:hover {
-  background: var(--color-text-muted);
+/* ── Markmap Mindmap Architecture ── */
+svg.markmap,
+svg[id^="markmap"] {
+  background: transparent !important;
+  overflow: visible !important;
 }
 
-/* ── Markmap SVG overrides ── */
-.markmap-node text {
-  fill: var(--color-text) !important;
-  font-family: var(--font-sans) !important;
-  font-size: 14px !important;
-}
-
+/* Thicker, high-contrast connector curves */
 .markmap-link {
-  stroke-opacity: 0.4 !important;
+  stroke-width: 2.5px !important;
+  stroke-opacity: 0.85 !important;
+}
+
+/* Hide the default bottom underline */
+.markmap-node > line {
+  stroke-opacity: 0 !important;
+  display: none !important;
+}
+
+/* Branch toggle circle dot */
+.markmap-node > circle {
+  stroke-width: 2px !important;
+  r: 5px !important;
+  cursor: pointer !important;
+}
+
+/* Markmap HTML ForeignObject Container */
+.markmap-foreign {
+  overflow: visible !important;
+  display: inline-block !important;
+}
+
+.markmap-foreign > div {
+  width: auto !important;
+  display: inline-block !important;
+  transform: translate(-10px, 42%) !important; /* Shifted left to clear the circle dot and align incoming curves */
+}
+
+
+/* The actual rounded bubble card containing the text */
+.markmap-foreign > div > div {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  box-sizing: border-box !important;
+  padding: 4px 10px !important;
+  border-radius: 8px !important;
+  font-family: 'Inter', ui-sans-serif, system-ui, sans-serif !important;
+  font-size: 13px !important;
+  font-weight: 500 !important;
+  line-height: 1.3 !important;
+
+  white-space: nowrap !important;
+  color: var(--lm-node-text) !important;
+  background-color: var(--lm-node-bg) !important;
+  border: 1.5px solid var(--lm-node-border) !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12) !important;
+  transition: all 0.2s ease !important;
+}
+
+/* Root level card emphasis */
+g[data-depth="0"] .markmap-foreign > div > div {
+  font-size: 15px !important;
+  font-weight: 700 !important;
+  padding: 8px 16px !important;
+  border-radius: 12px !important;
+}
+
+/* Level 1 subtopics emphasis */
+g[data-depth="1"] .markmap-foreign > div > div {
+  font-weight: 600 !important;
+}
+
+/* Tailwind v4 – expose CSS vars as utilities */
+@layer base {
+  * {
+    border-color: var(--color-border);
+  }
 }
