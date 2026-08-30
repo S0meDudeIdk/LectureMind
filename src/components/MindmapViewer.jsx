@@ -3,7 +3,6 @@ import { Transformer } from 'markmap-lib';
 import { Markmap } from 'markmap-view';
 import { Plus, Minus, ArrowsOut } from '@phosphor-icons/react';
 import * as d3 from 'd3';
-import MindmapAudioWidget from './MindmapAudioWidget';
 
 const transformer = new Transformer();
 
@@ -76,20 +75,29 @@ const styleNodes = (svgEl) => {
       border = isRoot ? 'rgba(80,70,180,0.50)' : 'rgba(100,90,200,0.35)';
     }
 
-    const textColor = dark ? '#c4c2e8' : '#2a2460';
+    const textColor = dark ? '#ffffff' : '#1e1b4b';
 
-    el.style.setProperty('background-color', bg, 'important');
-    el.style.setProperty('border', `1px solid ${border}`, 'important');
-    el.style.setProperty('color', textColor, 'important');
-    el.style.setProperty('border-radius', isRoot ? '8px' : '5px', 'important');
-    el.style.setProperty('box-shadow', 'none', 'important');
-    el.style.setProperty('font-family', "'Inter', ui-sans-serif, system-ui, sans-serif", 'important');
-    el.style.setProperty('font-size', isRoot ? '13px' : '11.5px', 'important');
-    el.style.setProperty('font-weight', isRoot ? '700' : isL1 ? '600' : '500', 'important');
-    el.style.setProperty('padding', isRoot ? '5px 14px' : '3px 10px', 'important');
-    el.style.setProperty('line-height', '1.4', 'important');
-    el.style.setProperty('white-space', 'nowrap', 'important');
-    el.style.setProperty('letter-spacing', isRoot ? '-0.01em' : '0', 'important');
+    el.style.backgroundColor = bg;
+    el.style.border = `1px solid ${border}`;
+    el.style.color = textColor;
+    el.style.borderRadius = isRoot ? '8px' : '5px';
+    el.style.boxShadow = 'none';
+    el.style.fontFamily = "'Inter', ui-sans-serif, system-ui, sans-serif";
+    el.style.fontSize = isRoot ? '13px' : '11.5px';
+    el.style.fontWeight = isRoot ? '700' : isL1 ? '600' : '500';
+    el.style.padding = isRoot ? '5px 14px' : '3px 10px';
+    el.style.lineHeight = '1.4';
+    el.style.whiteSpace = 'nowrap';
+    el.style.letterSpacing = isRoot ? '-0.01em' : '0';
+
+    // Explicitly enforce textColor and typographic spacing on all KaTeX math text & symbols
+    el.querySelectorAll('.katex').forEach((kEl) => {
+      kEl.style.margin = '0 0.35em';
+      kEl.style.display = 'inline-block';
+    });
+    el.querySelectorAll('.katex, .katex *').forEach((kEl) => {
+      kEl.style.color = textColor;
+    });
   });
 };
 
@@ -123,10 +131,6 @@ function ZoomBtn({ onClick, title, children }) {
 
 export default function MindmapViewer({
   markdown,
-  audioUrl,
-  transcript = [],
-  title,
-  isVideo = false
 }) {
   const svgRef      = useRef(null);
   const markmapRef  = useRef(null);
@@ -139,7 +143,16 @@ export default function MindmapViewer({
     });
   }, []);
 
-  /* Initial render */
+  /* Initial render & Global fit registration */
+  useEffect(() => {
+    window.__lecturemind_fit_mindmap = () => {
+      markmapRef.current?.fit();
+    };
+    return () => {
+      delete window.__lecturemind_fit_mindmap;
+    };
+  }, []);
+
   useEffect(() => {
     if (!svgRef.current) return;
     if (!markmapRef.current) {
@@ -176,10 +189,10 @@ export default function MindmapViewer({
 
   return (
     /* No border/card — mindmap floats directly on dot-grid canvas */
-    <div className="w-full h-full relative overflow-hidden">
+    <div id="mindmap-viewport-container" className="w-full h-full relative overflow-hidden">
       <svg
         ref={svgRef}
-        className="w-full h-full"
+        className="w-full h-full markmap"
         style={{ overflow: 'visible', display: 'block' }}
       />
 
@@ -195,7 +208,7 @@ export default function MindmapViewer({
       {/* ── Zoom controls — bottom-left floating overlay ── */}
       {markdown && (
         <div
-          className="absolute bottom-4 left-4 z-10 flex flex-col gap-1 p-1 rounded-lg"
+          className="markmap-zoom-controls absolute bottom-4 left-4 z-10 flex flex-col gap-1 p-1 rounded-lg"
           style={{
             backgroundColor: 'var(--color-surface)',
             border: '1px solid var(--color-border)',
@@ -208,16 +221,6 @@ export default function MindmapViewer({
           <div className="h-px mx-1" style={{ backgroundColor: 'var(--color-border)' }} />
           <ZoomBtn onClick={handleFit}     title="Fit view"> <ArrowsOut size={13} /></ZoomBtn>
         </div>
-      )}
-
-      {/* ── Floating Lecture Media Player & Transcript Card — Top-Right Overlay ── */}
-      {markdown && (
-        <MindmapAudioWidget
-          audioUrl={audioUrl}
-          transcript={transcript}
-          title={title}
-          isVideo={isVideo}
-        />
       )}
     </div>
   );

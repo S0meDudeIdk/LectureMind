@@ -97,36 +97,29 @@ export default function MindmapAudioWidget({
     return () => document.removeEventListener('mousedown', handleOutsideClick);
   }, [isSpeedMenuOpen]);
 
-  // Handle actual audio/video element loading
+  // 60fps Smooth progress bar synchronization while playing
   useEffect(() => {
-    const media = mediaRef.current;
-    if (!media) return;
-
-    const onLoadedMetadata = () => {
-      if (media.duration && !isNaN(media.duration) && media.duration !== Infinity) {
-        setDuration(media.duration);
-      }
-    };
-
-    const onTimeUpdate = () => {
-      setCurrentTime(media.currentTime);
-    };
-
-    const onEnded = () => {
-      setIsPlaying(false);
-      setCurrentTime(0);
-    };
-
-    media.addEventListener('loadedmetadata', onLoadedMetadata);
-    media.addEventListener('timeupdate', onTimeUpdate);
-    media.addEventListener('ended', onEnded);
-
+    let animId;
+    if (isPlaying) {
+      const loop = () => {
+        if (mediaRef.current) {
+          const ct = mediaRef.current.currentTime;
+          if (typeof ct === 'number' && !isNaN(ct)) {
+            setCurrentTime(ct);
+          }
+          const dur = mediaRef.current.duration;
+          if (typeof dur === 'number' && !isNaN(dur) && dur > 0 && dur !== Infinity) {
+            setDuration(dur);
+          }
+        }
+        animId = requestAnimationFrame(loop);
+      };
+      animId = requestAnimationFrame(loop);
+    }
     return () => {
-      media.removeEventListener('loadedmetadata', onLoadedMetadata);
-      media.removeEventListener('timeupdate', onTimeUpdate);
-      media.removeEventListener('ended', onEnded);
+      if (animId) cancelAnimationFrame(animId);
     };
-  }, [audioUrl, isVideo]);
+  }, [isPlaying, audioUrl]);
 
   // Fallback synthetic playback loop if no real audioUrl stream is active
   useEffect(() => {
@@ -137,9 +130,9 @@ export default function MindmapAudioWidget({
             setIsPlaying(false);
             return 0;
           }
-          return prev + 1 * playbackRate;
+          return prev + 0.25 * playbackRate;
         });
-      }, 1000);
+      }, 250);
     } else {
       if (synthTimerRef.current) clearInterval(synthTimerRef.current);
     }
@@ -333,6 +326,23 @@ export default function MindmapAudioWidget({
               playsInline
               className="w-full h-full object-contain cursor-pointer"
               onClick={togglePlay}
+              onTimeUpdate={(e) => setCurrentTime(e.currentTarget.currentTime)}
+              onLoadedMetadata={(e) => {
+                if (e.currentTarget.duration && !isNaN(e.currentTarget.duration)) {
+                  setDuration(e.currentTarget.duration);
+                }
+              }}
+              onDurationChange={(e) => {
+                if (e.currentTarget.duration && !isNaN(e.currentTarget.duration)) {
+                  setDuration(e.currentTarget.duration);
+                }
+              }}
+              onPlay={() => setIsPlaying(true)}
+              onPause={() => setIsPlaying(false)}
+              onEnded={() => {
+                setIsPlaying(false);
+                setCurrentTime(0);
+              }}
             />
           </div>
         ) : (
@@ -343,6 +353,23 @@ export default function MindmapAudioWidget({
               src={audioUrl}
               preload="metadata"
               className="hidden"
+              onTimeUpdate={(e) => setCurrentTime(e.currentTarget.currentTime)}
+              onLoadedMetadata={(e) => {
+                if (e.currentTarget.duration && !isNaN(e.currentTarget.duration)) {
+                  setDuration(e.currentTarget.duration);
+                }
+              }}
+              onDurationChange={(e) => {
+                if (e.currentTarget.duration && !isNaN(e.currentTarget.duration)) {
+                  setDuration(e.currentTarget.duration);
+                }
+              }}
+              onPlay={() => setIsPlaying(true)}
+              onPause={() => setIsPlaying(false)}
+              onEnded={() => {
+                setIsPlaying(false);
+                setCurrentTime(0);
+              }}
             />
           )
         )}

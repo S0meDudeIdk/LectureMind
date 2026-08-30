@@ -37,12 +37,12 @@
   --color-border: rgba(255, 255, 255, 0.12);         /* thin crisp white border in dark mode */
   --color-border-subtle: rgba(255, 255, 255, 0.08);  /* subtle divider */
 
-  /* Mindmap node tokens — NeetCode periwinkle */
-  --lm-node-text: #c4c2e8;
-  --lm-node-bg: rgba(62, 58, 130, 0.68);
-  --lm-node-border: rgba(110, 100, 210, 0.42);
-  --lm-node-root-bg: rgba(72, 68, 148, 0.88);
-  --lm-node-root-border: rgba(135, 125, 248, 0.62);
+  /* Mindmap node tokens — crisp white text in dark mode */
+  --lm-node-text: #ffffff;
+  --lm-node-bg: rgba(62, 58, 130, 0.75);
+  --lm-node-border: rgba(130, 120, 240, 0.55);
+  --lm-node-root-bg: rgba(72, 68, 155, 0.92);
+  --lm-node-root-border: rgba(150, 140, 255, 0.75);
 
   /* Dot grid — slightly more visible than before */
   --dot-color: rgba(255, 255, 255, 0.055);
@@ -60,12 +60,12 @@
   --color-border: rgba(0, 0, 0, 0.12);         /* thin crisp black border in light mode */
   --color-border-subtle: rgba(0, 0, 0, 0.07);  /* subtle divider */
 
-  /* Mindmap node tokens — light periwinkle tint */
-  --lm-node-text: #2a2460;
-  --lm-node-bg: rgba(210, 205, 255, 0.80);
-  --lm-node-border: rgba(100, 90, 200, 0.38);
-  --lm-node-root-bg: rgba(190, 185, 255, 0.92);
-  --lm-node-root-border: rgba(80, 70, 180, 0.55);
+  /* Mindmap node tokens — deep indigo in light mode */
+  --lm-node-text: #1e1b4b;
+  --lm-node-bg: rgba(215, 210, 255, 0.85);
+  --lm-node-border: rgba(100, 90, 200, 0.45);
+  --lm-node-root-bg: rgba(195, 190, 255, 0.95);
+  --lm-node-root-border: rgba(80, 70, 180, 0.65);
 
   /* Dot grid — dark dots on light canvas */
   --dot-color: rgba(80, 70, 160, 0.07);
@@ -178,6 +178,32 @@ svg[id^="markmap"] {
   border: 1px solid var(--lm-node-border) !important;
   box-shadow: none !important;
   transition: background-color 0.15s ease, border-color 0.15s ease !important;
+}
+
+/* Force all text and KaTeX elements inside node cards to inherit crisp node color */
+.markmap-foreign > div > div *,
+.markmap-foreign .katex,
+.markmap-foreign .katex * {
+  color: var(--lm-node-text) !important;
+}
+
+/* Space between normal text and KaTeX text in mindmap nodes */
+.markmap-foreign .katex {
+  margin: 0 0.35em !important;
+  display: inline-block !important;
+}
+
+/* Hide KaTeX MathML layer and raw TeX annotations during export and view to prevent duplicate raw text */
+.katex-mathml,
+.katex-mathml *,
+annotation {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  font-size: 0 !important;
+  width: 0 !important;
+  height: 0 !important;
+  pointer-events: none !important;
 }
 
 /* Root level: slightly larger, more prominent */
@@ -329,6 +355,37 @@ html.light .cm-line.cm-h4 *,
 html.light .cm-line.cm-h5 *,
 html.light .cm-line.cm-h6 * {
   color: #0f172a !important;
+}
+
+/* ─────────────────────────────────────────────
+   OBSIDIAN HR DIVIDER
+───────────────────────────────────────────── */
+.obsidian-hr-divider {
+  display: flex !important;
+  align-items: center !important;
+  width: 100% !important;
+  height: 1.4em !important;
+  user-select: none !important;
+  pointer-events: auto !important;
+  cursor: pointer !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
+.obsidian-hr-divider-line {
+  width: 100% !important;
+  height: 2px !important;
+  background-color: #374151 !important; /* Visible dark gray in light mode */
+  border: none !important;
+  border-radius: 1px !important;
+  opacity: 0.9 !important;
+  pointer-events: none !important;
+}
+
+html.dark .obsidian-hr-divider-line,
+.dark .obsidian-hr-divider-line {
+  background-color: rgba(255, 255, 255, 0.15) !important;
+  opacity: 1 !important;
 }
 
 /* ─────────────────────────────────────────────

@@ -6,10 +6,18 @@ import LoadingOverlay from './components/LoadingOverlay';
 import MindmapViewer from './components/MindmapViewer';
 import MarkdownEditor from './components/MarkdownEditor';
 import TranscriptViewer from './components/TranscriptViewer';
+import MindmapAudioWidget from './components/MindmapAudioWidget';
 import ErrorBanner from './components/ErrorBanner';
+import GoogleDocsExportModal from './components/GoogleDocsExportModal';
 import { useAudioUpload } from './hooks/useAudioUpload';
 import { getMediaFromLocalDb } from './services/mediaDb';
 import { updateMindmap } from './services/db';
+import { 
+  exportMindmapAsJpg, 
+  exportMindmapAsPdf, 
+  exportMarkdownFile, 
+  exportToGoogleDocs 
+} from './utils/exportUtils';
 
 export default function App() {
   const [activeLectureId, setActiveLectureId] = useState(null);
@@ -20,6 +28,7 @@ export default function App() {
   const [customTitle, setCustomTitle] = useState('');
   const [customIsVideo, setCustomIsVideo] = useState(false);
   const [activeTab, setActiveTab] = useState('mindmap');
+  const [isDocsModalOpen, setIsDocsModalOpen] = useState(false);
 
   const {
     processAudio,
@@ -143,16 +152,20 @@ export default function App() {
   };
 
   const handleExportMd = () => {
-    const content  = activeTab === 'editor' ? activeNotes : activeMarkdown;
-    const filename = activeTab === 'editor' ? 'lecture-notes.md' : 'mindmap.md';
-    const blob = new Blob([content], { type: 'text/markdown' });
-    const url  = URL.createObjectURL(blob);
-    const a    = document.createElement('a');
-    a.href = url; a.download = filename; a.click();
-    URL.revokeObjectURL(url);
+    exportMarkdownFile(activeNotes || activeMarkdown, activeTitle || 'lecture-notes');
   };
 
-  const handleExportDocs = () => alert('Export to Google Docs triggered!');
+  const handleExportDocs = () => {
+    setIsDocsModalOpen(true);
+  };
+
+  const handleExportMindmapJpg = () => {
+    exportMindmapAsJpg(activeTitle || 'lecture-mindmap', activeMarkdown);
+  };
+
+  const handleExportMindmapPdf = () => {
+    exportMindmapAsPdf(activeTitle || 'lecture-mindmap', activeMarkdown);
+  };
 
   const sidebar = (
     <Sidebar
@@ -172,6 +185,8 @@ export default function App() {
       hasContent={hasContent}
       onExportMd={handleExportMd}
       onExportDocs={handleExportDocs}
+      onExportMindmapJpg={handleExportMindmapJpg}
+      onExportMindmapPdf={handleExportMindmapPdf}
     >
       {/* ── Empty state ── */}
       {!activeMarkdown && !isProcessing && (
@@ -207,30 +222,47 @@ export default function App() {
             </div>
           )}
           <div className="flex-1 overflow-hidden relative">
-            {activeTab === 'mindmap' && (
-              <MindmapViewer
+            {/* Mindmap Tab View - Kept mounted and measured in background for instant switching & export readiness */}
+            <div
+              id="mindmap-tab-pane"
+              className={`h-full w-full ${activeTab === 'mindmap' ? 'block relative z-0' : 'absolute inset-0 invisible pointer-events-none -z-10'}`}
+            >
+              <MindmapViewer markdown={activeMarkdown} />
+            </div>
+
+            {/* Note Editor Tab View - Kept mounted to preserve scroll & cursor */}
+            <div
+              className={`h-full w-full overflow-y-auto p-5 ${activeTab === 'editor' ? 'block relative z-0' : 'absolute inset-0 invisible pointer-events-none -z-10'}`}
+            >
+              <MarkdownEditor
                 markdown={activeMarkdown}
-                audioUrl={activeAudioUrl}
-                transcript={activeTranscript}
-                title={activeTitle}
-                isVideo={activeIsVideo}
+                notes={activeNotes}
+                onContentChange={(_html, rawMd) => setCustomNotes(rawMd)}
+                onSave={handleNotesSave}
               />
-            )}
-            {activeTab === 'editor' && (
-              <div className="h-full overflow-y-auto p-5">
-                <MarkdownEditor
-                  markdown={activeMarkdown}
-                  notes={activeNotes}
-                  onContentChange={(_html, rawMd) => setCustomNotes(rawMd)}
-                  onSave={handleNotesSave}
-                />
-              </div>
-            )}
+            </div>
+
+            {/* Transcript Tab View */}
             {activeTab === 'transcript' && (
               <div className="h-full overflow-y-auto p-5">
                 <TranscriptViewer transcript={activeTranscript} />
               </div>
             )}
+
+            {/* Global Floating Lecture Audio/Video Player & Transcript (persists across all tabs) */}
+            <MindmapAudioWidget
+              audioUrl={activeAudioUrl}
+              transcript={activeTranscript}
+              title={activeTitle}
+              isVideo={activeIsVideo}
+            />
+
+            <GoogleDocsExportModal
+              isOpen={isDocsModalOpen}
+              onClose={() => setIsDocsModalOpen(false)}
+              content={activeNotes || activeMarkdown}
+              title={activeTitle || 'Lecture Notes'}
+            />
           </div>
         </div>
       )}

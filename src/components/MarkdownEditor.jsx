@@ -32,9 +32,6 @@ import {
   Info,
   Copy,
   Check,
-  DownloadSimple,
-  Sparkle,
-  FileDoc,
   Eraser
 } from '@phosphor-icons/react';
 
@@ -427,21 +424,6 @@ export default function MarkdownEditor({
     setTimeout(() => setCopied(false), 1500);
   };
 
-  const handleDownloadMd = () => {
-    const blob = new Blob([rawMarkdown], { type: 'text/markdown' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'lecture-notes.md';
-    a.click();
-    URL.revokeObjectURL(url);
-  };
-
-  const handleExportToDocs = () => {
-    console.log('[LectureMind] Exporting active Markdown/HTML to Google Docs:\n', renderedHtml);
-    alert('Export to Google Docs triggered! (Rendered HTML logged to developer console)');
-  };
-
   // Extensions for Hybrid Live Preview
   const livePreviewExtensions = useMemo(() => {
     return [
@@ -465,23 +447,6 @@ export default function MarkdownEditor({
           }
         }
         return tr;
-      }),
-      EditorView.inputHandler.of((view, from, to, text) => {
-        const line = view.state.doc.lineAt(from);
-        const taskMatch = line.text.match(/^(\s*[-*+]\s+\[[ xX\-\/]\]\s*)/);
-        if (taskMatch) {
-          const prefixEnd = line.from + taskMatch[0].length;
-          if (from >= prefixEnd) {
-            view.dispatch({
-              changes: { from, to, insert: text },
-              selection: EditorSelection.cursor(from + text.length, 1),
-              userEvent: 'input.type',
-              scrollIntoView: true
-            });
-            return true;
-          }
-        }
-        return false;
       }),
       isLight ? modernLightEditorTheme : modernDarkEditorTheme,
       syntaxHighlighting(isLight ? modernLightHighlightStyle : modernDarkHighlightStyle),
@@ -549,15 +514,10 @@ export default function MarkdownEditor({
 
   return (
     <div className="flex flex-col h-full bg-surface border border-black/10 dark:border-white/10 rounded-xl overflow-hidden shadow-sm">
-      {/* ── Top Ribbon Header: Live Preview Pill | Centered Ribbon | Actions ── */}
+      {/* ── Top Ribbon Header: Auto-save badge | Centered Ribbon | Actions ── */}
       <div className="relative flex items-center justify-between p-2 border-b border-black/10 dark:border-white/10 bg-surface/90 backdrop-blur-sm min-h-[46px] gap-2 overflow-x-auto">
-        {/* Left: Hybrid Live Preview indicator + Auto-save badge */}
+        {/* Left: Auto-save badge + Copy MD Button */}
         <div className="flex items-center gap-2 shrink-0 z-10">
-          <div className="flex items-center gap-1.5 px-3 py-1 text-xs font-semibold rounded-lg bg-primary/15 text-primary-light border border-black/10 dark:border-white/10 select-none shadow-xs">
-            <Sparkle size={14} weight="fill" className="text-amber-400" />
-            <span>Live Preview</span>
-          </div>
-
           {/* Auto-save status */}
           <div className="flex items-center gap-1 px-1.5 py-0.5 text-[11.5px] font-medium text-text-muted select-none">
             {saveStatus === 'saving' && (
@@ -579,6 +539,27 @@ export default function MarkdownEditor({
               </span>
             )}
           </div>
+
+          <div className="h-3.5 w-px bg-black/10 dark:bg-white/10" />
+
+          {/* Copy MD Button on Left */}
+          <button
+            onClick={handleCopyMarkdown}
+            className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-text bg-surface-alt/70 border border-black/10 dark:border-white/10 hover:bg-surface-overlay rounded-lg transition-colors cursor-pointer"
+            title="Copy Markdown Source"
+          >
+            {copied ? (
+              <>
+                <Check size={13} className="text-emerald-400" weight="bold" />
+                <span className="text-emerald-400 font-medium">Copied</span>
+              </>
+            ) : (
+              <>
+                <Copy size={13} className="text-text-muted" />
+                <span>Copy MD</span>
+              </>
+            )}
+          </button>
         </div>
 
         {/* Center: Formatting Ribbon (Precisely Centered) */}
@@ -713,44 +694,8 @@ export default function MarkdownEditor({
           </button>
         </div>
 
-        {/* Right Corner: Copy MD, Download, Export */}
-        <div className="flex items-center gap-1.5 shrink-0 z-10 ml-auto">
-          <button
-            onClick={handleCopyMarkdown}
-            className="flex items-center gap-1.5 px-2 py-1 text-xs font-medium text-text bg-surface border border-black/10 dark:border-white/10 hover:bg-surface-overlay rounded-lg transition-colors cursor-pointer"
-            title="Copy Markdown Source"
-          >
-            {copied ? (
-              <>
-                <Check size={13} className="text-emerald-400" weight="bold" />
-                <span className="text-emerald-400 font-medium">Copied</span>
-              </>
-            ) : (
-              <>
-                <Copy size={13} className="text-text-muted" />
-                <span>Copy MD</span>
-              </>
-            )}
-          </button>
-
-          <button
-            onClick={handleDownloadMd}
-            className="flex items-center gap-1.5 px-2 py-1 text-xs font-medium text-text bg-surface border border-black/10 dark:border-white/10 hover:bg-surface-overlay rounded-lg transition-colors cursor-pointer"
-            title="Download .md file"
-          >
-            <DownloadSimple size={13} className="text-text-muted" />
-            <span>Download</span>
-          </button>
-
-          <button
-            onClick={handleExportToDocs}
-            className="flex items-center gap-1.5 px-2.5 py-1 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold rounded-lg shadow-sm transition-all hover:shadow-blue-500/20 cursor-pointer"
-            title="Export content to Google Docs"
-          >
-            <FileDoc size={14} weight="bold" />
-            <span>Docs</span>
-          </button>
-        </div>
+        {/* Right Corner (Clear for floating widgets) */}
+        <div className="w-8 shrink-0 pointer-events-none" />
       </div>
 
       {/* ── Editor Viewport Body: Pure Interactive Hybrid Live Preview ── */}
