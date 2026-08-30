@@ -15,8 +15,7 @@ import { updateMindmap } from './services/db';
 import { 
   exportMindmapAsJpg, 
   exportMindmapAsPdf, 
-  exportMarkdownFile, 
-  exportToGoogleDocs 
+  exportMarkdownFile 
 } from './utils/exportUtils';
 
 export default function App() {

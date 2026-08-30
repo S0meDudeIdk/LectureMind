@@ -5,9 +5,10 @@
   "description": "LectureMind — AI-Powered Audio-to-Mindmap Generator",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "vite --host 0.0.0.0 --port 3000",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview --host 0.0.0.0 --port 3000",
+    "lint": "oxlint"
   },
   "dependencies": {
     "@codemirror/lang-markdown": "^6.5.2",
@@ -34,7 +35,7 @@
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.3",
     "@vitejs/plugin-react": "^6.0.5",
-    "puppeteer": "^25.9.0",
+    "oxlint": "^1.80.0",
     "tailwindcss": "^4.3.3",
     "vite": "^8.2.1"
   },

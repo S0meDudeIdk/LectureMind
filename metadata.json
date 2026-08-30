@@ -1,0 +1,6 @@
+{
+  "name": "LectureMind",
+  "description": "Transform lecture audio and video recordings into interactive mindmaps, verbatim transcripts, and comprehensive study notes using AI.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
