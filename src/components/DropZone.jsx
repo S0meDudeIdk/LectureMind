@@ -32,19 +32,29 @@ export default function DropZone({ onFileSelect }) {
   return (
     <div className="w-full max-w-2xl mx-auto p-8">
       <div className="text-center mb-8">
-        <h2 className="text-3xl font-bold mb-3 tracking-tight">Turn lectures into knowledge</h2>
-        <p className="text-text-muted">Upload an audio or video recording and let Gemini create a structured mindmap.</p>
+        <h2
+          className="text-3xl font-bold mb-3 tracking-tight"
+          style={{ color: 'var(--color-text)' }}
+        >
+          Turn lectures into knowledge
+        </h2>
+        <p style={{ color: 'var(--color-text-muted)' }}>
+          Upload an audio or video recording and let Gemini create a structured mindmap.
+        </p>
       </div>
 
-      <label 
+      <label
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
-        className={`relative flex flex-col items-center justify-center w-full h-72 border-2 border-dashed rounded-2xl cursor-pointer transition-all ${
-          isDragging 
-            ? 'border-primary bg-primary/5 scale-[1.02]' 
-            : 'border-border bg-surface-alt/50 hover:bg-surface-alt hover:border-primary/50'
-        }`}
+        className="relative flex flex-col items-center justify-center w-full h-72 border-2 border-dashed rounded-2xl cursor-pointer transition-all"
+        style={{
+          borderColor: isDragging ? '#6366F1' : 'var(--color-border-subtle)',
+          backgroundColor: isDragging ? 'rgba(99,102,241,0.06)' : 'var(--color-surface-alt)',
+          transform: isDragging ? 'scale(1.015)' : 'none',
+        }}
+        onMouseEnter={e => { if (!isDragging) e.currentTarget.style.borderColor = 'rgba(99,102,241,0.4)'; }}
+        onMouseLeave={e => { if (!isDragging) e.currentTarget.style.borderColor = 'var(--color-border-subtle)'; }}
       >
         <div className="flex flex-col items-center justify-center pt-5 pb-6">
           <div className="w-16 h-16 rounded-full bg-surface border border-border flex items-center justify-center mb-4 shadow-sm">

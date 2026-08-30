@@ -13,10 +13,14 @@ import {
   disableNetwork
 } from 'firebase/firestore';
 import { db, isFirebaseConfigured } from './firebase';
+import { deleteMediaFromCloud } from './storage';
+import { deleteMediaFromLocalDb } from './mediaDb';
 
 const COLLECTION_NAME = 'mindmaps';
 const LOCAL_STORAGE_KEY = 'lecturemind_saved_mindmaps';
-const INITIALIZED_KEY = 'lecturemind_db_initialized_v2';
+const INITIALIZED_KEY = 'lecturemind_db_initialized_v6';
+
+
 const EVENT_STORAGE_UPDATE = 'lecturemind_storage_update';
 
 const INITIAL_SAMPLE_MINDMAPS = [
@@ -43,7 +47,62 @@ const INITIAL_SAMPLE_MINDMAPS = [
 ## Practical Applications
 - Cryptographic security
 - Molecular simulation
-- Financial modeling`
+- Financial modeling`,
+    notes: `# Introduction to Quantum Computing: Comprehensive Lecture Notes
+
+## Executive Summary
+Quantum computing represents a paradigm shift in computational complexity, moving beyond classical binary logic (0 and 1) to harness fundamental principles of quantum mechanics. By exploiting superposition, entanglement, and quantum interference, quantum processors solve specific mathematical problems exponentially faster than classical supercomputers.
+
+## 1. Fundamental Quantum Mechanical Principles
+
+### Quantum Superposition
+In classical computing, a bit is constrained to either state 0 or state 1. A quantum bit (qubit) is described by a linear combination of states:
+\`|ψ⟩ = α|0⟩ + β|1⟩\` where \`|α|² + |β|² = 1\`.
+This allows an n-qubit register to simultaneously represent 2ⁿ states in a continuous Hilbert space.
+
+### Quantum Entanglement
+When two or more qubits become entangled, the quantum state of one cannot be described independently of the other, regardless of spatial separation. Einstein referred to this as "spooky action at a distance." Entanglement enables:
+- Dense coding and quantum teleportation.
+- Exponential state space correlation for multi-qubit parallel evaluation.
+
+### Constructive & Destructive Interference
+Quantum algorithms utilize interference patterns to amplify the probability amplitudes of correct solutions while canceling out incorrect computational paths before measurement collapses the wave function.
+
+## 2. Hardware Architectures & Physical Realization
+
+- **Superconducting Transmon Qubits**: Microfabricated Josephson junctions operating at millikelvin temperatures inside dilution refrigerators. Offers fast gate speeds (nanoseconds) but faces thermal decoherence.
+- **Trapped Ion Systems**: Individual ionized atoms suspended in electromagnetic vacuum traps manipulated by precision lasers. Highly coherent with long coherence times (T2).
+- **Photonic Quantum Computing**: Uses single photons routed through optical waveguides operating at ambient room temperature.
+
+## 3. Groundbreaking Quantum Algorithms
+
+### Shor's Algorithm
+Developed by Peter Shor in 1994, this algorithm computes prime factors of integers in polynomial time O((log N)³). This poses a theoretical vulnerability for asymmetric cryptography (RSA / ECC), accelerating global migration to Post-Quantum Cryptography (PQC).
+
+### Grover's Algorithm
+Provides a quadratic speedup for unstructured database searches, transforming an O(N) classical brute-force search into O(√N) oracle queries.
+
+## 4. Key Takeaways & Practical Outlook
+1. Quantum supremacy has been demonstrated for specific sampling tasks, but fault-tolerant quantum computing (FTQC) requires error correction thresholds (e.g., surface codes).
+2. Primary commercial near-term domains include molecular simulation for drug discovery, battery chemistry optimization, and financial risk modeling.`,
+    transcript: [
+      {
+        startTime: "00:00",
+        textBlock: "Welcome to our overview of quantum computing architectures. Today, we delve into how quantum mechanical phenomena can be harnessed to process information exponentially faster than classical Turing machines."
+      },
+      {
+        startTime: "00:38",
+        textBlock: "The heart of quantum computing lies in superposition and entanglement. Rather than being confined to discrete binary states of zero or one, quantum bits exist in continuous probability amplitudes across the Bloch sphere."
+      },
+      {
+        startTime: "01:25",
+        textBlock: "When implementing physical qubits, superconducting circuits and trapped ion traps are leading the race. Superconducting circuits allow rapid gate speeds, though they demand dilution refrigeration close to absolute zero."
+      },
+      {
+        startTime: "02:10",
+        textBlock: "Looking at algorithmic advantages, Shor's algorithm provides polynomial-time prime factorization, posing challenges to RSA encryption. Concurrently, Grover's algorithm delivers quadratic acceleration for unstructured database searches."
+      }
+    ]
   },
   { 
     id: 'sample-2', 
@@ -64,8 +123,113 @@ const INITIAL_SAMPLE_MINDMAPS = [
 ## Governance Models
 - Regulatory frameworks
 - Audit standards
-- Explainability tools`
+- Explainability tools`,
+    notes: `# Machine Learning Ethics & Governance: Study Notes
+
+## Executive Overview
+As artificial intelligence models are deployed in high-stakes societal domains—including healthcare triage, criminal justice, financial underwriting, and recruitment—algorithmic accountability, fairness, and privacy guarantees have become paramount engineering concerns.
+
+## 1. Algorithmic Bias & Representation Disparities
+
+### Sources of Bias
+- **Historical Data Bias**: Training data reflects historical societal prejudices and systemic inequalities.
+- **Sampling Disparity**: Under-representation of minority demographics leads to degraded predictive performance and higher error rates for those sub-populations.
+- **Feedback Loops**: Predictive policing and recidivism scoring models generate self-fulfilling prophecies when enforcement actions generate the data used to validate future risk predictions.
+
+## 2. Privacy Preservation & Security Guarantees
+
+### Differential Privacy (DP)
+Differential privacy provides mathematical bounds on the disclosure of individual training records:
+\`P[M(D) ∈ S] ≤ e^ε · P[M(D') ∈ S] + δ\`
+By adding calibrated Gaussian or Laplacian noise to gradients during training (DP-SGD), models ensure that no single individual's record substantially influences the final model weights.
+
+### Federated Learning (FL)
+Decentralized model training across distributed edge devices without centralizing raw user data.
+
+## 3. Explainability & Governance
+- **Post-Hoc Interpretability**: Methods like SHAP and LIME decompose black-box neural predictions.
+- **Auditing Standards**: Algorithmic Impact Assessments (AIAs) and the EU AI Act enforce compliance.`,
+    transcript: [
+      {
+        startTime: "00:00",
+        textBlock: "In this seminar, we examine the societal implications of deploying machine learning models in high-stakes environments."
+      },
+      {
+        startTime: "00:42",
+        textBlock: "Algorithmic bias predominantly stems from skewed historical training datasets."
+      }
+    ]
   },
+  {
+    id: 'sample-3',
+    title: 'Pythagorean Theorem',
+    date: 'Sample',
+    duration: '18:40',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    markdown: `# Pythagorean Theorem
+## Geometric Concepts
+- Right-angled triangle
+- 90° angle
+- Hypotenuse (c)
+- Perpendicular legs (a, b)
+## Mathematical Formulas
+- Standard: a² + b² = c²
+- Hypotenuse: c = √(a² + b²)
+- Leg: a = √(c² - b²)
+## Calculation Example
+- Given: a = 3 cm, b = 4 cm
+- 3² = 9
+- 4² = 16
+- 9 + 16 = 25
+- Result: c = 5 cm
+## Pythagorean Triples
+- 3-4-5 Triplet
+- 5-12-13 Triplet
+- 8-15-17 Triplet`,
+    notes: `# Pythagorean Theorem: Complete Geometry Study Notes
+
+## Executive Summary
+The Pythagorean Theorem is a fundamental principle of Euclidean geometry that establishes the mathematical relationship between the lengths of the sides of a right-angled triangle. It provides a straightforward method for calculating Euclidean distance between points on a coordinate plane.
+
+## Fundamental Concepts & Geometric Representation
+
+### Anatomy of a Right Triangle
+- **Legs ($a$ and $b$)**: The two perpendicular sides that intersect to form the $90^\\circ$ right angle. On a Cartesian grid, these correspond to the horizontal and vertical intervals $\\Delta x$ and $\\Delta y$.
+- **Hypotenuse ($c$)**: The longest side of the right triangle, situated directly opposite the $90^\\circ$ right angle.
+
+### Area Interpretation & Proof
+Geometrically, if squares are constructed on each of the three sides:
+- The square along leg $a$ has an area of $a^2$.
+- The square along leg $b$ has an area of $b^2$.
+- The square along hypotenuse $c$ has an area of $c^2$.
+
+The theorem states that the sum of the areas of the two leg squares equals the area of the hypotenuse square:
+$$a^2 + b^2 = c^2$$
+
+## Algebraic Formula for Hypotenuse Length
+To solve directly for the length of hypotenuse $c$, take the principal square root of both sides:
+$$c = \\sqrt{a^2 + b^2}$$
+
+Similarly, to compute an unknown perpendicular leg:
+$$a = \\sqrt{c^2 - b^2} \\quad \\text{and} \\quad b = \\sqrt{c^2 - a^2}$$
+
+## Pythagorean Triples
+Integer solutions $(a, b, c)$ satisfying $a^2 + b^2 = c^2$:
+- **$3, 4, 5$**: $3^2 + 4^2 = 9 + 16 = 25 = 5^2$
+- **$5, 12, 13$**: $5^2 + 12^2 = 25 + 144 = 169 = 13^2$
+- **$8, 15, 17$**: $8^2 + 15^2 = 64 + 225 = 289 = 17^2$`,
+    transcript: [
+      {
+        startTime: "00:00",
+        textBlock: "Welcome to today's geometry session. We will examine the Pythagorean Theorem and its geometric derivations."
+      },
+      {
+        startTime: "00:35",
+        textBlock: "For any right triangle with perpendicular sides a and b and hypotenuse c, the sum of the squares of the legs equals the square of the hypotenuse."
+      }
+    ]
+  }
 ];
 
 let isFirestoreDisabled = false;
@@ -169,6 +333,7 @@ export const saveMindmap = async (title, markdown, duration = 'Lecture', extraMe
     id: localId,
     title: docTitle,
     markdown,
+    notes: extraMeta.notes || markdown,
     duration: duration || 'Lecture',
     date: 'Just now',
     createdAt: now.toISOString(),
@@ -189,6 +354,7 @@ export const saveMindmap = async (title, markdown, duration = 'Lecture', extraMe
         const firestoreData = {
           title: docTitle,
           markdown,
+          notes: extraMeta.notes || markdown,
           duration: duration || 'Lecture',
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
@@ -227,7 +393,8 @@ export const updateMindmap = async (id, updates = {}) => {
       return {
         ...item,
         ...updates,
-        markdown: updates.markdown || updatedMarkdown,
+        markdown: updates.markdown !== undefined ? updates.markdown : updatedMarkdown,
+        notes: updates.notes !== undefined ? updates.notes : item.notes,
         updatedAt: new Date().toISOString(),
       };
     }
@@ -253,16 +420,32 @@ export const updateMindmap = async (id, updates = {}) => {
 
 /**
  * Delete a mindmap by ID.
+ * Cleans up LocalStorage, IndexedDB, Firebase Storage, and Firestore.
  */
 export const deleteMindmap = async (id) => {
   if (!id) return;
 
   // 1. Delete from LocalStorage immediately
   const localList = getLocalMindmaps();
+  const targetItem = localList.find((item) => item.id === id);
   const filteredList = localList.filter((item) => item.id !== id);
   setLocalMindmaps(filteredList);
 
-  // 2. Background sync to Firestore if not a local/sample ID
+  // 2. Delete from IndexedDB (both by ID and by title/filename if cached)
+  deleteMediaFromLocalDb(id);
+  if (targetItem?.title) {
+    deleteMediaFromLocalDb(targetItem.title);
+  }
+  if (targetItem?.fileName) {
+    deleteMediaFromLocalDb(targetItem.fileName);
+  }
+
+  // 3. Delete from Firebase Storage for ANY lecture (including local-* IDs)
+  if (id !== '1' && id !== '2' && !id.startsWith('sample-')) {
+    deleteMediaFromCloud(id, targetItem?.audioUrl);
+  }
+
+  // 4. Background sync: delete from Firestore if not a local/sample ID
   if (isFirebaseConfigured && db && !isFirestoreDisabled && !id.startsWith('local-') && !id.startsWith('sample-') && id !== '1' && id !== '2') {
     (async () => {
       try {

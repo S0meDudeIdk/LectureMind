@@ -1,157 +1,135 @@
-import { useEffect, useRef, useCallback } from 'react';
+import { useEffect, useRef, useCallback, useState } from 'react';
 import { Transformer } from 'markmap-lib';
 import { Markmap } from 'markmap-view';
+import { Plus, Minus, ArrowsOut } from '@phosphor-icons/react';
 import * as d3 from 'd3';
+import MindmapAudioWidget from './MindmapAudioWidget';
 
 const transformer = new Transformer();
 
 const isDark = () => !document.documentElement.classList.contains('light');
 
-const hexToRgba = (hex, alpha) => {
-  if (!hex || !hex.startsWith('#')) return `rgba(99,102,241,${alpha})`;
-  const r = parseInt(hex.slice(1, 3), 16);
-  const g = parseInt(hex.slice(3, 5), 16);
-  const b = parseInt(hex.slice(5, 7), 16);
-  return `rgba(${r},${g},${b},${alpha})`;
-};
-
-// Curated harmonic palette families for main branches (depth 1) and their children (depth 2+)
-const BRANCH_PALETTES = [
-  {
-    name: 'orange',
-    main: '#F97316', // Vibrant Orange
-    shades: ['#FB923C', '#EA580C', '#FDBA74', '#F97316', '#FF8C42', '#C2410C'],
-  },
-  {
-    name: 'purple',
-    main: '#A855F7', // Violet / Purple
-    shades: ['#C084FC', '#9333EA', '#D8B4FE', '#A855F7', '#E879F9', '#7E22CE'],
-  },
-  {
-    name: 'cyan',
-    main: '#06B6D4', // Cyan / Teal
-    shades: ['#22D3EE', '#0891B2', '#38BDF8', '#06B6D4', '#14B8A6', '#0E7490'],
-  },
-  {
-    name: 'emerald',
-    main: '#10B981', // Emerald / Mint
-    shades: ['#34D399', '#059669', '#6EE7B7', '#10B981', '#4ADE80', '#047857'],
-  },
-  {
-    name: 'rose',
-    main: '#F43F5E', // Rose / Coral
-    shades: ['#FB7185', '#E11D48', '#FDA4AF', '#F43F5E', '#F472B6', '#BE123C'],
-  },
-  {
-    name: 'amber',
-    main: '#F59E0B', // Amber / Gold
-    shades: ['#FBBF24', '#D97706', '#FCD34D', '#F59E0B', '#FDE047', '#B45309'],
-  },
-  {
-    name: 'blue',
-    main: '#3B82F6', // Blue / Indigo
-    shades: ['#60A5FA', '#2563EB', '#93C5FD', '#3B82F6', '#818CF8', '#1D4ED8'],
-  },
-];
-
-// Color resolver: ensures each main branch and all its children share the same color family
-const getNodeColor = (node) => {
-  const depth = node?.state?.depth ?? 0;
-  const path = node?.state?.path || '1';
-  const parts = path.split('.').map(Number);
-
-  // Depth 0: Central root node
-  if (depth === 0 || parts.length <= 1) {
-    return '#6366F1';
-  }
-
-  // Branch index (0-based)
-  const branchIdx = Math.max(0, (parts[1] || 1) - 1) % BRANCH_PALETTES.length;
-  const palette = BRANCH_PALETTES[branchIdx];
-
-  // Depth 1: Main branch -> primary color of family
-  if (depth === 1 || parts.length === 2) {
-    return palette.main;
-  }
-
-  // Depth 2+: Subtopics & Details -> adjacent harmonious shades within the SAME family
-  const shadeSeed = parts.slice(2).reduce((acc, num) => (acc * 3 + (num || 1)), 0);
-  const childIdx = Math.max(0, shadeSeed - 1) % palette.shades.length;
-  return palette.shades[childIdx];
-};
-
+const getCssToken = (name) =>
+  getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 
 const MARKMAP_OPTIONS = {
   spacingHorizontal: 110,
   spacingVertical: 14,
   paddingX: 8,
-  duration: 350,
-  color: getNodeColor,
+  duration: 300,
+  // connector colour — set low-opacity; overridden in styleNodes too
+  color: () => isDark()
+    ? 'rgba(130, 120, 210, 0.22)'
+    : 'rgba(100, 90, 180, 0.20)',
 };
 
-
-
-// Styles the native HTML bubble cards inside foreignObject
+/* ── Style all SVG nodes after render ── */
 const styleNodes = (svgEl) => {
   if (!svgEl) return;
   const dark = isDark();
-  const textColor = dark ? '#F8FAFC' : '#0F172A';
   const svg = d3.select(svgEl);
 
-  // Remove any legacy SVG rects
   svg.selectAll('.lm-bubble').remove();
 
-  // Hide default bottom underline
+  // Hide default underline
   svg.selectAll('.markmap-node > line')
     .style('stroke-opacity', '0')
     .style('display', 'none');
 
-  // Thicker connector links
+  // Bezier connector lines — barely visible, matching NeetCode thinness
   svg.selectAll('.markmap-link')
-    .style('stroke-width', '2.5px')
-    .style('stroke-opacity', dark ? '0.85' : '0.75');
+    .style('stroke', dark ? 'rgba(120, 112, 200, 0.28)' : 'rgba(90, 80, 180, 0.22)')
+    .style('stroke-width', '1px')
+    .style('stroke-opacity', '1')
+    .style('fill', 'none');
 
-  // Circle toggle dots
+  // Circle toggle dots — small, subtle
   svg.selectAll('.markmap-node > circle')
-    .style('stroke-width', '2px')
-    .style('r', '5px');
+    .style('fill', dark ? '#1e1e2e' : '#f0eeff')
+    .style('stroke', dark ? 'rgba(130,120,210,0.5)' : 'rgba(100,90,180,0.4)')
+    .style('stroke-width', '1px')
+    .style('r', '3.5px');
 
-  // Style each node's HTML card directly
+  // Node cards
   svg.selectAll('g.markmap-node').each(function () {
-    const g = d3.select(this);
+    const g     = d3.select(this);
     const datum = g.datum();
     const depth = datum?.state?.depth ?? datum?.depth ?? 0;
-    const color = datum?.state?.color ?? datum?.color ?? '#6366F1';
-
     const isRoot = depth === 0;
+    const isL1   = depth === 1;
 
-    // Harmonic background tint & matching border
-    const fillColor = dark
-      ? isRoot ? hexToRgba(color, 0.45) : hexToRgba(color, 0.20)
-      : isRoot ? hexToRgba(color, 0.28) : hexToRgba(color, 0.12);
-
-    const strokeColor = dark
-      ? isRoot ? hexToRgba(color, 0.95) : hexToRgba(color, 0.80)
-      : isRoot ? hexToRgba(color, 0.85) : hexToRgba(color, 0.65);
-
-    // Target the innermost div that holds the text
     const cardDiv = g.select('.markmap-foreign > div > div');
-    const target = cardDiv.empty() ? g.select('.markmap-foreign div') : cardDiv;
+    const target  = cardDiv.empty() ? g.select('.markmap-foreign div') : cardDiv;
+    if (target.empty()) return;
 
-    if (!target.empty()) {
-      const el = target.node();
-      el.style.setProperty('background-color', fillColor, 'important');
-      el.style.setProperty('border', `${isRoot ? 2 : 1.5}px solid ${strokeColor}`, 'important');
-      el.style.setProperty('color', textColor, 'important');
-      el.style.setProperty('border-radius', isRoot ? '12px' : '8px', 'important');
-      el.style.setProperty('box-shadow', dark ? `0 0 10px ${hexToRgba(color, 0.25)}` : '0 1px 3px rgba(0,0,0,0.08)', 'important');
+    const el = target.node();
+
+    // NeetCode palette:
+    // Dark → periwinkle-slate: bg #2e2c5e→#35326e, border rgba(99,102,200,0.45)
+    // Light → soft indigo tint: bg #eeeeff, border rgba(100,90,200,0.3)
+    let bg, border;
+    if (dark) {
+      bg     = isRoot ? 'rgba(66,62,140,0.85)' : isL1 ? 'rgba(58,54,120,0.75)' : 'rgba(52,48,108,0.65)';
+      border = isRoot ? 'rgba(130,120,240,0.60)' : 'rgba(110,100,210,0.40)';
+    } else {
+      bg     = isRoot ? 'rgba(200,195,255,0.85)' : isL1 ? 'rgba(215,210,255,0.80)' : 'rgba(225,220,255,0.75)';
+      border = isRoot ? 'rgba(80,70,180,0.50)' : 'rgba(100,90,200,0.35)';
     }
+
+    const textColor = dark ? '#c4c2e8' : '#2a2460';
+
+    el.style.setProperty('background-color', bg, 'important');
+    el.style.setProperty('border', `1px solid ${border}`, 'important');
+    el.style.setProperty('color', textColor, 'important');
+    el.style.setProperty('border-radius', isRoot ? '8px' : '5px', 'important');
+    el.style.setProperty('box-shadow', 'none', 'important');
+    el.style.setProperty('font-family', "'Inter', ui-sans-serif, system-ui, sans-serif", 'important');
+    el.style.setProperty('font-size', isRoot ? '13px' : '11.5px', 'important');
+    el.style.setProperty('font-weight', isRoot ? '700' : isL1 ? '600' : '500', 'important');
+    el.style.setProperty('padding', isRoot ? '5px 14px' : '3px 10px', 'important');
+    el.style.setProperty('line-height', '1.4', 'important');
+    el.style.setProperty('white-space', 'nowrap', 'important');
+    el.style.setProperty('letter-spacing', isRoot ? '-0.01em' : '0', 'important');
   });
 };
 
-export default function MindmapViewer({ markdown }) {
-  const svgRef = useRef(null);
-  const markmapRef = useRef(null);
+/* ── Zoom control button ── */
+function ZoomBtn({ onClick, title, children }) {
+  return (
+    <button
+      onClick={onClick}
+      title={title}
+      className="w-7 h-7 flex items-center justify-center rounded-md transition-all cursor-pointer"
+      style={{
+        backgroundColor: 'var(--color-surface-alt)',
+        border: '1px solid var(--color-border)',
+        color: 'var(--color-text-muted)',
+      }}
+      onMouseEnter={e => {
+        e.currentTarget.style.backgroundColor = 'var(--color-surface-overlay)';
+        e.currentTarget.style.color = 'var(--color-text)';
+        e.currentTarget.style.borderColor = 'var(--color-border-subtle)';
+      }}
+      onMouseLeave={e => {
+        e.currentTarget.style.backgroundColor = 'var(--color-surface-alt)';
+        e.currentTarget.style.color = 'var(--color-text-muted)';
+        e.currentTarget.style.borderColor = 'var(--color-border)';
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
+export default function MindmapViewer({
+  markdown,
+  audioUrl,
+  transcript = [],
+  title,
+  isVideo = false
+}) {
+  const svgRef      = useRef(null);
+  const markmapRef  = useRef(null);
 
   const applyStyles = useCallback(() => {
     if (!svgRef.current) return;
@@ -161,6 +139,7 @@ export default function MindmapViewer({ markdown }) {
     });
   }, []);
 
+  /* Initial render */
   useEffect(() => {
     if (!svgRef.current) return;
     if (!markmapRef.current) {
@@ -174,37 +153,71 @@ export default function MindmapViewer({ markdown }) {
     }
   }, [markdown, applyStyles]);
 
-  // Re-apply on theme toggle
+  /* Re-style on theme toggle */
   useEffect(() => {
-    const obs = new MutationObserver(() => {
-      if (markdown) applyStyles();
-    });
+    const obs = new MutationObserver(() => { if (markdown) applyStyles(); });
     obs.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
     return () => obs.disconnect();
   }, [markdown, applyStyles]);
 
-  // Re-apply on branch toggle clicks
+  /* Re-style on branch toggle click */
   useEffect(() => {
     const svgEl = svgRef.current;
     if (!svgEl) return;
-    const handleClick = () => {
-      setTimeout(() => applyStyles(), 250);
-    };
-    svgEl.addEventListener('click', handleClick);
-    return () => svgEl.removeEventListener('click', handleClick);
+    const fn = () => setTimeout(applyStyles, 260);
+    svgEl.addEventListener('click', fn);
+    return () => svgEl.removeEventListener('click', fn);
   }, [applyStyles]);
 
+  /* ── Zoom handlers ── */
+  const handleZoomIn  = () => markmapRef.current?.rescale(1.3);
+  const handleZoomOut = () => markmapRef.current?.rescale(0.75);
+  const handleFit     = () => markmapRef.current?.fit();
+
   return (
-    <div className="w-full h-full min-h-[500px] bg-surface rounded-xl overflow-hidden relative border border-border shadow-sm">
+    /* No border/card — mindmap floats directly on dot-grid canvas */
+    <div className="w-full h-full relative overflow-hidden">
       <svg
         ref={svgRef}
-        className="w-full h-full absolute inset-0"
-        style={{ overflow: 'visible' }}
+        className="w-full h-full"
+        style={{ overflow: 'visible', display: 'block' }}
       />
+
       {!markdown && (
-        <div className="absolute inset-0 flex items-center justify-center bg-surface-alt/50">
-          <p className="text-text-muted text-sm">No mindmap data</p>
+        <div
+          className="absolute inset-0 flex items-center justify-center"
+          style={{ color: 'var(--color-text-muted)' }}
+        >
+          <p className="text-sm">No mindmap data</p>
         </div>
+      )}
+
+      {/* ── Zoom controls — bottom-left floating overlay ── */}
+      {markdown && (
+        <div
+          className="absolute bottom-4 left-4 z-10 flex flex-col gap-1 p-1 rounded-lg"
+          style={{
+            backgroundColor: 'var(--color-surface)',
+            border: '1px solid var(--color-border)',
+            boxShadow: '0 4px 20px rgba(0,0,0,0.25)',
+          }}
+        >
+          <ZoomBtn onClick={handleZoomIn}  title="Zoom in">  <Plus   size={13} weight="bold" /></ZoomBtn>
+          <div className="h-px mx-1" style={{ backgroundColor: 'var(--color-border)' }} />
+          <ZoomBtn onClick={handleZoomOut} title="Zoom out"> <Minus  size={13} weight="bold" /></ZoomBtn>
+          <div className="h-px mx-1" style={{ backgroundColor: 'var(--color-border)' }} />
+          <ZoomBtn onClick={handleFit}     title="Fit view"> <ArrowsOut size={13} /></ZoomBtn>
+        </div>
+      )}
+
+      {/* ── Floating Lecture Media Player & Transcript Card — Top-Right Overlay ── */}
+      {markdown && (
+        <MindmapAudioWidget
+          audioUrl={audioUrl}
+          transcript={transcript}
+          title={title}
+          isVideo={isVideo}
+        />
       )}
     </div>
   );

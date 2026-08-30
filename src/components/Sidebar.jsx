@@ -20,10 +20,8 @@ export default function Sidebar({
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
 
-  // Subscribe to real-time mindmap updates (LocalStorage + Firestore dual-sync)
   useEffect(() => {
     let unsubscribe = () => {};
-    
     try {
       unsubscribe = subscribeToRecentMindmaps((items) => {
         setFirestoreLectures(items);
@@ -36,15 +34,11 @@ export default function Sidebar({
         setLoading(false);
       });
     }
-
     return () => unsubscribe();
   }, []);
 
-  // Use active mindmap list directly from persistent storage
   const allLectures = firestoreLectures;
 
-
-  // Filter lectures based on search query
   const filteredLectures = allLectures.filter((lec) => {
     if (!searchQuery.trim()) return true;
     const q = searchQuery.toLowerCase();
@@ -62,56 +56,81 @@ export default function Sidebar({
   const handleDelete = async (id) => {
     await deleteMindmap(id);
     onDeleteLecture?.(id);
-    if (id === activeId) {
-      onNew?.();
-    }
+    if (id === activeId) onNew?.();
   };
 
   return (
-    <aside className="w-64 border-r border-border bg-surface-alt/30 flex flex-col h-full shrink-0">
-      <div className="p-4 border-b border-border/50 space-y-4">
-        <button 
+    <aside
+      className="w-60 flex flex-col h-full shrink-0"
+      style={{
+        backgroundColor: 'var(--color-surface-alt)',
+        borderRight: '1px solid var(--color-border)',
+      }}
+    >
+      {/* Header area */}
+      <div className="p-3 space-y-2.5" style={{ borderBottom: '1px solid var(--color-border)' }}>
+        {/* New Mindmap button */}
+        <button
           onClick={onNew}
-          className="w-full flex items-center justify-center gap-2 bg-primary hover:bg-primary-light text-white text-sm font-medium py-2 px-4 rounded-lg transition-colors shadow-sm cursor-pointer"
+          className="w-full flex items-center justify-center gap-1.5 text-xs font-semibold py-2 px-3 rounded-lg transition-all cursor-pointer text-white"
+          style={{ backgroundColor: '#6366F1' }}
+          onMouseEnter={e => e.currentTarget.style.backgroundColor = '#818CF8'}
+          onMouseLeave={e => e.currentTarget.style.backgroundColor = '#6366F1'}
         >
-          <Plus weight="bold" />
+          <Plus weight="bold" size={14} />
           New Mindmap
         </button>
-        
+
+        {/* Search */}
         <div className="relative">
-          <MagnifyingGlass className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted" size={16} />
-          <input 
-            type="text" 
+          <MagnifyingGlass
+            className="absolute left-2.5 top-1/2 -translate-y-1/2"
+            size={13}
+            style={{ color: 'var(--color-text-muted)' }}
+          />
+          <input
+            type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search mindmaps..." 
-            className="w-full bg-surface border border-border rounded-lg pl-9 pr-3 py-1.5 text-sm focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/50 text-text placeholder:text-text-muted/50"
+            placeholder="Search mindmaps..."
+            className="w-full rounded-lg pl-8 pr-3 py-1.5 text-xs focus:outline-none transition-all"
+            style={{
+              backgroundColor: 'var(--color-surface)',
+              border: '1px solid var(--color-border)',
+              color: 'var(--color-text)',
+            }}
+            onFocus={e => e.currentTarget.style.borderColor = 'rgba(99,102,241,0.5)'}
+            onBlur={e => e.currentTarget.style.borderColor = 'var(--color-border)'}
           />
         </div>
       </div>
-      
-      <div className="flex-1 overflow-y-auto p-3 space-y-2">
-        <div className="flex items-center justify-between text-xs font-semibold text-text-muted uppercase tracking-wider mb-3 px-1">
+
+      {/* List */}
+      <div className="flex-1 overflow-y-auto p-2.5 space-y-1">
+        <div
+          className="flex items-center justify-between text-[10px] font-semibold uppercase tracking-wider mb-2 px-1"
+          style={{ color: 'var(--color-text-muted)' }}
+        >
           <span>Recent Mindmaps</span>
-          {loading && <SpinnerGap className="animate-spin text-text-muted" size={12} />}
+          {loading && <SpinnerGap className="animate-spin" size={11} />}
         </div>
 
         {filteredLectures.length === 0 ? (
-          <div className="text-center py-6 px-2">
-            <p className="text-xs text-text-muted/70">
+          <div className="text-center py-8 px-2">
+            <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
               {searchQuery ? 'No matching mindmaps' : 'No mindmaps saved yet'}
             </p>
           </div>
         ) : (
           filteredLectures.map((lec) => (
-            <LectureCard 
-              key={lec.id} 
+            <LectureCard
+              key={lec.id}
               id={lec.id}
               title={lec.title}
               date={lec.date}
               duration={lec.duration}
               markdown={lec.markdown}
-              active={lec.id === activeId} 
+              active={lec.id === activeId}
               onClick={() => onSelectLecture?.(lec)}
               onRename={handleRename}
               onDelete={handleDelete}

@@ -11,10 +11,7 @@ export default function ExportButton({ onExportDocs, onExportMd }) {
       if (type === 'docs') await onExportDocs();
       if (type === 'md') await onExportMd();
       setStatus('done');
-      setTimeout(() => {
-        setStatus('idle');
-        setIsOpen(false);
-      }, 2000);
+      setTimeout(() => { setStatus('idle'); setIsOpen(false); }, 2000);
     } catch (e) {
       setStatus('idle');
     }
@@ -22,31 +19,54 @@ export default function ExportButton({ onExportDocs, onExportMd }) {
 
   return (
     <div className="relative">
-      <button 
+      <button
         onClick={() => setIsOpen(!isOpen)}
-        className="flex items-center gap-2 px-4 py-2 bg-surface hover:bg-surface-alt border border-border rounded-lg text-sm font-medium transition-colors shadow-sm"
+        className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg transition-all cursor-pointer"
+        style={{
+          backgroundColor: 'var(--color-surface-overlay)',
+          border: '1px solid var(--color-border)',
+          color: 'var(--color-text)',
+        }}
+        onMouseEnter={e => e.currentTarget.style.borderColor = 'var(--color-border-subtle)'}
+        onMouseLeave={e => e.currentTarget.style.borderColor = 'var(--color-border)'}
       >
-        {status === 'done' ? <CheckCircle className="text-accent" /> : <Export />}
+        {status === 'done' ? (
+          <CheckCircle size={14} className="text-emerald-400" />
+        ) : (
+          <Export size={14} style={{ color: 'var(--color-text-muted)' }} />
+        )}
         {status === 'done' ? 'Exported!' : 'Export'}
       </button>
-      
+
       {isOpen && status !== 'done' && (
-        <div className="absolute right-0 mt-2 w-48 bg-surface-alt border border-border rounded-lg shadow-xl overflow-hidden z-50">
-          <button 
+        <div
+          className="absolute right-0 mt-1.5 w-44 rounded-xl shadow-2xl overflow-hidden z-50 p-1"
+          style={{
+            backgroundColor: 'var(--color-surface-alt)',
+            border: '1px solid var(--color-border-subtle)',
+          }}
+        >
+          <button
             onClick={() => handleExport('docs')}
             disabled={status === 'exporting'}
-            className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-surface-overlay text-sm transition-colors"
+            className="w-full flex items-center gap-2.5 px-3 py-2 text-left text-xs rounded-lg transition-colors cursor-pointer"
+            style={{ color: 'var(--color-text)' }}
+            onMouseEnter={e => e.currentTarget.style.backgroundColor = 'var(--color-surface-overlay)'}
+            onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'}
           >
-            <FileText size={18} className="text-primary-light" />
+            <FileText size={14} style={{ color: '#818CF8' }} />
             <span>Save to Docs</span>
           </button>
-          <div className="h-px bg-border/50 w-full"></div>
-          <button 
+          <div className="h-px my-1" style={{ backgroundColor: 'var(--color-border)' }} />
+          <button
             onClick={() => handleExport('md')}
             disabled={status === 'exporting'}
-            className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-surface-overlay text-sm transition-colors"
+            className="w-full flex items-center gap-2.5 px-3 py-2 text-left text-xs rounded-lg transition-colors cursor-pointer"
+            style={{ color: 'var(--color-text)' }}
+            onMouseEnter={e => e.currentTarget.style.backgroundColor = 'var(--color-surface-overlay)'}
+            onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'}
           >
-            <DownloadSimple size={18} className="text-text-muted" />
+            <DownloadSimple size={14} style={{ color: 'var(--color-text-muted)' }} />
             <span>Download .md</span>
           </button>
         </div>
