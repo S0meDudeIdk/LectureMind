@@ -68,12 +68,11 @@ export async function signOutUser() {
  */
 export function useAuth() {
   const [user, setUser] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => isFirebaseConfigured && Boolean(auth));
   const [driveToken, setDriveToken] = useState(getStoredDriveToken);
 
   useEffect(() => {
     if (!isFirebaseConfigured || !auth) {
-      setLoading(false);
       return;
     }
 
