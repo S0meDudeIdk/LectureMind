@@ -1,7 +1,7 @@
 import { 
   Brain, UserCircle, Sun, Moon, TreeStructure, NotePencil, 
-  FileText, FilePdf, Image as ImageIcon, DownloadSimple, 
-  SidebarSimple, Export, FileDoc, SignOut, GoogleLogo, CheckCircle
+  FileText, FilePdf, Image as ImageIcon, 
+  SidebarSimple, Export, FileDoc, SignOut, GoogleLogo, CheckCircle, Copy, Check
 } from '@phosphor-icons/react';
 import { useState, useRef, useEffect } from 'react';
 import { useTheme } from '../context/ThemeContext';
@@ -68,6 +68,8 @@ export default function Header({
     return () => document.removeEventListener('mousedown', handler);
   }, [accountOpen]);
 
+  const [domainCopied, setDomainCopied] = useState(false);
+
   const handleSignIn = async () => {
     setAuthLoading(true);
     setAuthError(null);
@@ -76,7 +78,22 @@ export default function Header({
       setAccountOpen(false);
     } catch (err) {
       console.error('Sign in failed:', err);
-      setAuthError(err.message || 'Sign in failed');
+      const code = err?.code || '';
+      const msg = err?.message || '';
+      if (code === 'auth/unauthorized-domain' || msg.includes('unauthorized-domain')) {
+        setAuthError({
+          type: 'unauthorized-domain',
+          domain: window.location.hostname,
+        });
+      } else if (code === 'auth/popup-closed-by-user' || msg.includes('popup-closed')) {
+        // User voluntarily closed the popup, no error needed
+        setAuthError(null);
+      } else {
+        setAuthError({
+          type: 'generic',
+          message: msg || 'Sign in failed. Please check your Firebase settings.',
+        });
+      }
     } finally {
       setAuthLoading(false);
     }
@@ -367,8 +384,40 @@ export default function Header({
                   </div>
 
                   {authError && (
-                    <div className="p-2 text-[11px] rounded-lg bg-rose-500/15 border border-rose-500/30 text-rose-400">
-                      {authError}
+                    <div className="text-left p-2.5 text-[11px] rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-400 space-y-2">
+                      {authError.type === 'unauthorized-domain' ? (
+                        <>
+                          <div className="font-semibold text-rose-300">
+                            Domain not authorized in Firebase
+                          </div>
+                          <p className="text-[10px] text-text-muted leading-relaxed">
+                            Add this domain to <strong>Firebase Console &gt; Authentication &gt; Settings &gt; Authorized domains</strong>:
+                          </p>
+                          <div className="flex items-center gap-1 bg-surface-alt/80 p-1.5 rounded-lg border border-border/60">
+                            <span className="font-mono text-[10px] text-text truncate select-all flex-1">
+                              {authError.domain}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                navigator.clipboard.writeText(authError.domain);
+                                setDomainCopied(true);
+                                setTimeout(() => setDomainCopied(false), 2000);
+                              }}
+                              className="p-1 rounded bg-surface hover:bg-surface-overlay text-text border border-border/50 shrink-0 cursor-pointer"
+                              title="Copy domain"
+                            >
+                              {domainCopied ? (
+                                <Check size={13} className="text-emerald-400" />
+                              ) : (
+                                <Copy size={13} />
+                              )}
+                            </button>
+                          </div>
+                        </>
+                      ) : (
+                        <div>{authError.message}</div>
+                      )}
                     </div>
                   )}
 

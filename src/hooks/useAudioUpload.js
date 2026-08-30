@@ -88,7 +88,7 @@ export function useAudioUpload() {
         }
       }).catch((err) => {
         setCloudUploadProgress(null);
-        console.warn('[Storage] Background cloud upload failed:', err);
+        console.info('[Storage] Background cloud upload not completed (using local media):', err?.message || err);
       });
 
       const aiAnalysisPromise = generateLectureContent(file, (msg) => setProgressMsg(msg));

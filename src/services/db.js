@@ -322,7 +322,7 @@ export const extractTitleFromMarkdown = (markdown, fallback = 'Untitled Lecture'
 };
 
 /**
- * Save a newly generated mindmap immediately with non-blocking Firestore sync.
+ * Save a newly generated mindmap with direct or background Firestore sync.
  */
 export const saveMindmap = async (title, markdown, duration = 'Lecture', extraMeta = {}) => {
   const docTitle = title || extractTitleFromMarkdown(markdown, 'Untitled Mindmap');
@@ -346,31 +346,34 @@ export const saveMindmap = async (title, markdown, duration = 'Lecture', extraMe
   const updatedList = [newDoc, ...localList.filter((item) => item.id !== localId)];
   setLocalMindmaps(updatedList);
 
-  // 2. Non-blocking background Firestore sync
+  // 2. Sync to Firestore if configured
   if (isFirebaseConfigured && db && !isFirestoreDisabled) {
-    (async () => {
-      try {
-        const colRef = collection(db, COLLECTION_NAME);
-        const firestoreData = {
-          title: docTitle,
-          markdown,
-          notes: extraMeta.notes || markdown,
-          duration: duration || 'Lecture',
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-          ...extraMeta,
-        };
+    try {
+      const colRef = collection(db, COLLECTION_NAME);
+      const firestoreData = {
+        title: docTitle,
+        markdown,
+        notes: extraMeta.notes || markdown,
+        duration: duration || 'Lecture',
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+        ...extraMeta,
+      };
 
-        const docRef = await timeoutPromise(addDoc(colRef, firestoreData), 2000);
+      // Try creating the Firestore document directly
+      const docRef = await timeoutPromise(addDoc(colRef, firestoreData), 4000);
+      if (docRef?.id) {
+        console.log(`[Firestore] Document saved successfully with ID:`, docRef.id);
         newDoc.id = docRef.id;
 
         const currentList = getLocalMindmaps();
         const syncedList = [newDoc, ...currentList.filter((item) => item.id !== localId && item.id !== docRef.id)];
         setLocalMindmaps(syncedList);
-      } catch (err) {
-        handleFirestoreError(err);
       }
-    })();
+    } catch (err) {
+      console.warn('[Firestore] Initial addDoc warning (falling back to LocalStorage):', err?.message || err);
+      handleFirestoreError(err);
+    }
   }
 
   return newDoc;
@@ -402,19 +405,43 @@ export const updateMindmap = async (id, updates = {}) => {
   });
   setLocalMindmaps(updatedList);
 
-  // 2. Background sync to Firestore if not a local/sample ID
-  if (isFirebaseConfigured && db && !isFirestoreDisabled && !id.startsWith('local-') && !id.startsWith('sample-') && id !== '1' && id !== '2') {
-    (async () => {
-      try {
+  // 2. Sync to Firestore if not a sample ID
+  if (isFirebaseConfigured && db && !isFirestoreDisabled && !id.startsWith('sample-') && id !== '1' && id !== '2') {
+    try {
+      if (id.startsWith('local-')) {
+        // If it was created as a local ID due to a previous timeout, create it in Firestore now
+        const itemToCreate = updatedList.find(i => i.id === id);
+        if (itemToCreate) {
+          const colRef = collection(db, COLLECTION_NAME);
+          const docRef = await timeoutPromise(addDoc(colRef, {
+            title: itemToCreate.title || 'Untitled Mindmap',
+            markdown: itemToCreate.markdown || '',
+            notes: itemToCreate.notes || '',
+            duration: itemToCreate.duration || 'Lecture',
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+            ...updates,
+          }), 4000);
+
+          if (docRef?.id) {
+            console.log('[Firestore] Local draft promoted to Firestore ID:', docRef.id);
+            const currentList = getLocalMindmaps();
+            const reindexedList = currentList.map(item => item.id === id ? { ...item, id: docRef.id } : item);
+            setLocalMindmaps(reindexedList);
+          }
+        }
+      } else {
         const docRef = doc(db, COLLECTION_NAME, id);
         await timeoutPromise(updateDoc(docRef, {
           ...updates,
           updatedAt: serverTimestamp(),
-        }), 2000);
-      } catch (err) {
-        handleFirestoreError(err);
+        }), 4000);
+        console.log('[Firestore] Document updated successfully:', id);
       }
-    })();
+    } catch (err) {
+      console.warn('[Firestore] Update failed:', err?.message || err);
+      handleFirestoreError(err);
+    }
   }
 };
 
