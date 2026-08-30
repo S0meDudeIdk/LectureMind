@@ -1,7 +1,11 @@
-import { Brain, UserCircle, Sun, Moon, TreeStructure, NotePencil, FileText } from '@phosphor-icons/react';
-import { SidebarSimple, Export, DownloadSimple } from '@phosphor-icons/react';
+import { 
+  Brain, UserCircle, Sun, Moon, TreeStructure, NotePencil, 
+  FileText, FilePdf, Image as ImageIcon, DownloadSimple, 
+  SidebarSimple, Export, FileDoc, SignOut, GoogleLogo, CheckCircle
+} from '@phosphor-icons/react';
 import { useState, useRef, useEffect } from 'react';
 import { useTheme } from '../context/ThemeContext';
+import { useAuth } from '../services/auth';
 
 /* ── Small icon button used repeatedly ── */
 function IconBtn({ onClick, title, children, style }) {
@@ -29,10 +33,18 @@ export default function Header({
   activeTab, setActiveTab, hasContent,
   sidebarOpen, onToggleSidebar,
   onExportMd, onExportDocs,
+  onExportMindmapJpg, onExportMindmapPdf,
 }) {
   const { theme, toggle } = useTheme();
+  const { user, signInWithGoogle, signOut, isConfigured } = useAuth();
+  
   const [exportOpen, setExportOpen] = useState(false);
+  const [accountOpen, setAccountOpen] = useState(false);
+  const [authLoading, setAuthLoading] = useState(false);
+  const [authError, setAuthError] = useState(null);
+
   const exportRef = useRef(null);
+  const accountRef = useRef(null);
 
   // Close export dropdown on outside click
   useEffect(() => {
@@ -44,6 +56,40 @@ export default function Header({
     if (exportOpen) document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
   }, [exportOpen]);
+
+  // Close account dropdown on outside click
+  useEffect(() => {
+    const handler = (e) => {
+      if (accountRef.current && !accountRef.current.contains(e.target)) {
+        setAccountOpen(false);
+      }
+    };
+    if (accountOpen) document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [accountOpen]);
+
+  const handleSignIn = async () => {
+    setAuthLoading(true);
+    setAuthError(null);
+    try {
+      await signInWithGoogle();
+      setAccountOpen(false);
+    } catch (err) {
+      console.error('Sign in failed:', err);
+      setAuthError(err.message || 'Sign in failed');
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  const handleSignOut = async () => {
+    try {
+      await signOut();
+      setAccountOpen(false);
+    } catch (err) {
+      console.error('Sign out failed:', err);
+    }
+  };
 
   const NAV_TABS = [
     { id: 'mindmap', label: 'Mindmap',     icon: TreeStructure },
@@ -61,7 +107,7 @@ export default function Header({
       {/* ── Left: Sidebar toggle + Logo + Nav tabs ── */}
       <div className="flex items-center gap-1 h-full">
 
-        {/* Sidebar collapse toggle — always visible, matches Claude/Gemini pattern */}
+        {/* Sidebar collapse toggle */}
         <IconBtn
           onClick={onToggleSidebar}
           title={sidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'}
@@ -138,55 +184,91 @@ export default function Header({
         )}
       </div>
 
-      {/* ── Right: Export + Ready status + theme + avatar ── */}
+      {/* ── Right: Export + theme + avatar ── */}
       <div className="flex items-center gap-2">
 
         {/* Export dropdown — only shown when content exists */}
         {hasContent && (
           <div className="relative" ref={exportRef}>
             <button
-              onClick={() => setExportOpen(o => !o)}
-              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium transition-all cursor-pointer"
+              onClick={() => setExportOpen(v => !v)}
+              className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-lg transition-colors cursor-pointer"
               style={{
                 backgroundColor: exportOpen ? 'var(--color-surface-overlay)' : 'var(--color-surface-alt)',
                 border: '1px solid var(--color-border)',
                 color: 'var(--color-text)',
               }}
-              onMouseEnter={e => e.currentTarget.style.borderColor = 'var(--color-border-subtle)'}
-              onMouseLeave={e => e.currentTarget.style.borderColor = 'var(--color-border)'}
+              onMouseEnter={e => e.currentTarget.style.backgroundColor = 'var(--color-surface-overlay)'}
+              onMouseLeave={e => {
+                if (!exportOpen) e.currentTarget.style.backgroundColor = 'var(--color-surface-alt)';
+              }}
+              title="Export mindmap or notes"
             >
-              <Export size={13} style={{ color: 'var(--color-text-muted)' }} />
-              Export
+              <Export size={13} weight="bold" />
+              <span>Export</span>
             </button>
 
             {exportOpen && (
               <div
-                className="absolute right-0 top-full mt-1.5 w-44 rounded-xl p-1 z-50"
+                className="absolute right-0 top-full mt-1.5 w-60 rounded-xl shadow-xl border p-1.5 z-50 flex flex-col gap-0.5 text-xs animate-in fade-in slide-in-from-top-1 duration-150"
                 style={{
-                  backgroundColor: 'var(--color-surface-alt)',
-                  border: '1px solid var(--color-border-subtle)',
-                  boxShadow: '0 8px 32px rgba(0,0,0,0.35)',
+                  backgroundColor: 'var(--color-surface)',
+                  borderColor: 'var(--color-border)',
                 }}
               >
-                <button
-                  onClick={() => { onExportDocs?.(); setExportOpen(false); }}
-                  className="w-full flex items-center gap-2.5 px-3 py-2 text-xs rounded-lg transition-colors text-left cursor-pointer"
-                  style={{ color: 'var(--color-text)' }}
-                  onMouseEnter={e => e.currentTarget.style.backgroundColor = 'var(--color-surface-overlay)'}
-                  onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'}
-                >
-                  <FileText size={13} style={{ color: '#818CF8' }} />
-                  Export to Google Docs
-                </button>
+                {/* ── Section 1: Note Editor ── */}
+                <div className="px-2.5 py-1 text-[11px] font-semibold tracking-wider uppercase text-text-muted flex items-center gap-1.5">
+                  <NotePencil size={12} className="text-primary-light" />
+                  <span>Note Editor</span>
+                </div>
                 <button
                   onClick={() => { onExportMd?.(); setExportOpen(false); }}
-                  className="w-full flex items-center gap-2.5 px-3 py-2 text-xs rounded-lg transition-colors text-left cursor-pointer"
+                  className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs rounded-lg transition-colors text-left cursor-pointer"
                   style={{ color: 'var(--color-text)' }}
                   onMouseEnter={e => e.currentTarget.style.backgroundColor = 'var(--color-surface-overlay)'}
                   onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'}
                 >
-                  <DownloadSimple size={13} style={{ color: 'var(--color-text-muted)' }} />
-                  Download .md
+                  <FileText size={14} className="text-primary-light" />
+                  <span>Export Markdown (.md)</span>
+                </button>
+                <button
+                  onClick={() => { onExportDocs?.(); setExportOpen(false); }}
+                  className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs rounded-lg transition-colors text-left cursor-pointer"
+                  style={{ color: 'var(--color-text)' }}
+                  onMouseEnter={e => e.currentTarget.style.backgroundColor = 'var(--color-surface-overlay)'}
+                  onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'}
+                >
+                  <FileDoc size={14} className="text-blue-500" />
+                  <span>Export to Google Docs</span>
+                </button>
+
+                {/* Divider */}
+                <div className="h-px my-1 mx-1.5 bg-black/10 dark:bg-white/10" />
+
+                {/* ── Section 2: Mindmap ── */}
+                <div className="px-2.5 py-1 text-[11px] font-semibold tracking-wider uppercase text-text-muted flex items-center gap-1.5">
+                  <TreeStructure size={12} className="text-indigo-400" />
+                  <span>Mindmap</span>
+                </div>
+                <button
+                  onClick={() => { onExportMindmapJpg?.(); setExportOpen(false); }}
+                  className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs rounded-lg transition-colors text-left cursor-pointer"
+                  style={{ color: 'var(--color-text)' }}
+                  onMouseEnter={e => e.currentTarget.style.backgroundColor = 'var(--color-surface-overlay)'}
+                  onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'}
+                >
+                  <ImageIcon size={14} className="text-emerald-500" />
+                  <span>Download as Image (.jpg)</span>
+                </button>
+                <button
+                  onClick={() => { onExportMindmapPdf?.(); setExportOpen(false); }}
+                  className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs rounded-lg transition-colors text-left cursor-pointer"
+                  style={{ color: 'var(--color-text)' }}
+                  onMouseEnter={e => e.currentTarget.style.backgroundColor = 'var(--color-surface-overlay)'}
+                  onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'}
+                >
+                  <FilePdf size={14} className="text-rose-500" />
+                  <span>Download as PDF (.pdf)</span>
                 </button>
               </div>
             )}
@@ -198,10 +280,111 @@ export default function Header({
           {theme === 'dark' ? <Sun size={15} /> : <Moon size={15} />}
         </IconBtn>
 
-        {/* User avatar */}
-        <IconBtn title="Account">
-          <UserCircle size={20} />
-        </IconBtn>
+        {/* User Account / Avatar Dropdown */}
+        <div className="relative" ref={accountRef}>
+          <button
+            onClick={() => setAccountOpen(v => !v)}
+            title={user ? `${user.displayName || user.email} (Account)` : 'Sign in with Google'}
+            className="w-7 h-7 rounded-full flex items-center justify-center transition-transform hover:scale-105 cursor-pointer overflow-hidden border border-border/80"
+            style={{ backgroundColor: 'var(--color-surface-alt)' }}
+          >
+            {user?.photoURL ? (
+              <img
+                src={user.photoURL}
+                alt={user.displayName || 'User'}
+                className="w-full h-full object-cover rounded-full"
+                onError={(e) => {
+                  e.currentTarget.style.display = 'none';
+                }}
+              />
+            ) : (
+              <UserCircle
+                size={20}
+                weight={user ? 'fill' : 'regular'}
+                className={user ? 'text-primary' : 'text-text-muted'}
+              />
+            )}
+          </button>
+
+          {/* Account Popover */}
+          {accountOpen && (
+            <div
+              className="absolute right-0 top-full mt-2 w-72 rounded-2xl shadow-2xl border p-4 z-50 text-xs animate-in fade-in slide-in-from-top-1 duration-150"
+              style={{
+                backgroundColor: 'var(--color-surface)',
+                borderColor: 'var(--color-border)',
+              }}
+            >
+              {user ? (
+                /* Logged In State */
+                <div className="flex flex-col gap-3">
+                  <div className="flex items-center gap-3">
+                    {user.photoURL ? (
+                      <img
+                        src={user.photoURL}
+                        alt={user.displayName || 'User'}
+                        className="w-10 h-10 rounded-full object-cover border border-border shrink-0"
+                      />
+                    ) : (
+                      <div className="w-10 h-10 rounded-full bg-primary/20 text-primary flex items-center justify-center font-bold text-sm shrink-0">
+                        {(user.displayName || user.email || 'U')[0].toUpperCase()}
+                      </div>
+                    )}
+                    <div className="overflow-hidden">
+                      <h4 className="font-bold text-sm text-text truncate">
+                        {user.displayName || 'Google User'}
+                      </h4>
+                      <p className="text-[11px] text-text-muted truncate">{user.email}</p>
+                    </div>
+                  </div>
+
+                  <div className="p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 flex items-center gap-2 text-[11px]">
+                    <CheckCircle size={15} weight="fill" className="shrink-0" />
+                    <span>Google Drive Synced & Ready</span>
+                  </div>
+
+                  <div className="h-px bg-border/60 my-0.5" />
+
+                  <button
+                    onClick={handleSignOut}
+                    className="w-full flex items-center justify-center gap-2 py-2 px-3 rounded-xl bg-surface-alt hover:bg-rose-500/15 hover:text-rose-400 border border-border/80 text-text font-medium transition-colors cursor-pointer"
+                  >
+                    <SignOut size={15} weight="bold" />
+                    <span>Sign Out</span>
+                  </button>
+                </div>
+              ) : (
+                /* Logged Out State */
+                <div className="flex flex-col gap-3 text-center">
+                  <div className="mx-auto w-10 h-10 rounded-xl bg-blue-500/15 border border-blue-500/30 flex items-center justify-center text-blue-500">
+                    <GoogleLogo size={22} weight="bold" />
+                  </div>
+                  <div>
+                    <h4 className="font-bold text-sm text-text">Sign in with Google</h4>
+                    <p className="text-[11px] text-text-muted mt-1 leading-relaxed">
+                      Connect your Google Account to export notes directly to your Google Drive in 1 click.
+                    </p>
+                  </div>
+
+                  {authError && (
+                    <div className="p-2 text-[11px] rounded-lg bg-rose-500/15 border border-rose-500/30 text-rose-400">
+                      {authError}
+                    </div>
+                  )}
+
+                  <button
+                    onClick={handleSignIn}
+                    disabled={authLoading}
+                    className="w-full flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-semibold shadow-sm transition-colors cursor-pointer"
+                  >
+                    <GoogleLogo size={16} weight="bold" />
+                    <span>{authLoading ? 'Signing in...' : 'Sign in with Google'}</span>
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
       </div>
     </header>
   );

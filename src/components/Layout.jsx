@@ -2,7 +2,10 @@ import { useState } from 'react';
 import Header from './Header';
 import { SidebarSimple } from '@phosphor-icons/react';
 
-export default function Layout({ sidebar, children, activeTab, setActiveTab, hasContent, onExportMd, onExportDocs }) {
+export default function Layout({ 
+  sidebar, children, activeTab, setActiveTab, hasContent, 
+  onExportMd, onExportDocs, onExportMindmapJpg, onExportMindmapPdf 
+}) {
   const [sidebarOpen, setSidebarOpen] = useState(true);
 
   return (
@@ -18,6 +21,8 @@ export default function Layout({ sidebar, children, activeTab, setActiveTab, has
         onToggleSidebar={() => setSidebarOpen(o => !o)}
         onExportMd={onExportMd}
         onExportDocs={onExportDocs}
+        onExportMindmapJpg={onExportMindmapJpg}
+        onExportMindmapPdf={onExportMindmapPdf}
       />
 
       <div className="flex flex-1 overflow-hidden">

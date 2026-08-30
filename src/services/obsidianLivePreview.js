@@ -53,6 +53,10 @@ class PropertiesWidget extends WidgetType {
     this.to = to;
   }
 
+  ignoreEvent() {
+    return true;
+  }
+
   eq(other) {
     return other.yamlText === this.yamlText;
   }
@@ -154,7 +158,7 @@ class TaskCheckboxWidget extends WidgetType {
   }
 
   ignoreEvent() {
-    return false;
+    return true;
   }
 
   eq(other) {
@@ -167,16 +171,6 @@ class TaskCheckboxWidget extends WidgetType {
       other.isFolded === this.isFolded &&
       other.lineNum === this.lineNum
     );
-  }
-
-  coordsAt(dom, pos, side) {
-    const rect = dom.getBoundingClientRect();
-    return {
-      left: rect.right,
-      right: rect.right,
-      top: rect.top,
-      bottom: rect.bottom,
-    };
   }
 
   toDOM(view) {
@@ -327,6 +321,10 @@ class KatexBlockWidget extends WidgetType {
     this.to = to;
   }
 
+  ignoreEvent() {
+    return true;
+  }
+
   eq(other) {
     return other.latex === this.latex;
   }
@@ -372,6 +370,10 @@ class KatexLiveEditPreviewWidget extends WidgetType {
     this.latex = latex;
   }
 
+  ignoreEvent() {
+    return true;
+  }
+
   eq(other) {
     return other.latex === this.latex;
   }
@@ -408,6 +410,10 @@ class KatexInlineWidget extends WidgetType {
     this.latex = latex;
     this.from = from;
     this.to = to;
+  }
+
+  ignoreEvent() {
+    return true;
   }
 
   eq(other) {
@@ -448,6 +454,10 @@ class CalloutHeaderWidget extends WidgetType {
     this.isFoldable = isFoldable;
     this.isFolded = isFolded;
     this.from = from;
+  }
+
+  ignoreEvent() {
+    return true;
   }
 
   eq(other) {
@@ -506,13 +516,35 @@ class CalloutHeaderWidget extends WidgetType {
 
 // ── 7. High-Contrast Horizontal Rule Divider Widget ──
 class HrWidget extends WidgetType {
-  toDOM() {
+  constructor(from) {
+    super();
+    this.from = from;
+  }
+
+  eq(other) {
+    return other.from === this.from;
+  }
+
+  ignoreEvent() {
+    return true;
+  }
+
+  toDOM(view) {
     const hr = document.createElement('div');
-    hr.className = 'obsidian-hr-divider flex items-center w-full select-none pointer-events-none m-0 p-0';
-    hr.style.height = '1.7em';
-    hr.innerHTML = `
-      <div class="w-full h-[1px] bg-black/15 dark:bg-white/15 border-none"></div>
-    `;
+    hr.className = 'obsidian-hr-divider';
+    const line = document.createElement('div');
+    line.className = 'obsidian-hr-divider-line';
+    hr.appendChild(line);
+
+    // Clicking the horizontal divider focuses cursor into raw `---` line for editing
+    hr.addEventListener('click', (e) => {
+      e.stopPropagation();
+      view.dispatch({
+        selection: { anchor: this.from }
+      });
+      view.focus();
+    });
+
     return hr;
   }
 }
@@ -522,6 +554,10 @@ class TagWidget extends WidgetType {
   constructor(tagText) {
     super();
     this.tagText = tagText;
+  }
+
+  ignoreEvent() {
+    return true;
   }
 
   eq(other) {
@@ -542,6 +578,10 @@ class WikiLinkWidget extends WidgetType {
     super();
     this.raw = raw;
     this.from = from;
+  }
+
+  ignoreEvent() {
+    return true;
   }
 
   eq(other) {
@@ -581,6 +621,10 @@ class EmbedWidget extends WidgetType {
     this.from = from;
   }
 
+  ignoreEvent() {
+    return true;
+  }
+
   eq(other) {
     return other.raw === this.raw;
   }
@@ -589,10 +633,8 @@ class EmbedWidget extends WidgetType {
     const span = document.createElement('span');
     span.className = 'obsidian-embed-pill inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium bg-surface-overlay border border-border/80 text-text cursor-pointer hover:border-primary/50 transition-colors select-none';
     
-    const isImg = /\.(png|jpg|jpeg|gif|webp|svg)$/i.test(this.raw);
-    const icon = isImg ? '🖼️' : '📄';
-
-    span.innerHTML = `<span class="text-xs">${icon}</span><span class="font-mono text-[11.5px]">${this.raw}</span>`;
+    let target = this.raw.trim();
+    span.innerHTML = `<span class="opacity-70 text-xs">📎</span><span>${target}</span>`;
 
     span.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -610,6 +652,10 @@ class FootnoteRefWidget extends WidgetType {
     super();
     this.id = id;
     this.from = from;
+  }
+
+  ignoreEvent() {
+    return true;
   }
 
   eq(other) {
@@ -636,6 +682,10 @@ class InlineFootnoteWidget extends WidgetType {
     super();
     this.note = note;
     this.from = from;
+  }
+
+  ignoreEvent() {
+    return true;
   }
 
   eq(other) {
@@ -665,6 +715,10 @@ class TableWidget extends WidgetType {
     this.tableText = tableText;
     this.from = from;
     this.to = to;
+  }
+
+  ignoreEvent() {
+    return true;
   }
 
   eq(other) { return other.tableText === this.tableText; }
@@ -790,6 +844,10 @@ class CodeBlockWidget extends WidgetType {
     this.to = to;
   }
 
+  ignoreEvent() {
+    return true;
+  }
+
   eq(other) {
     return other.lang === this.lang && other.code === this.code;
   }
@@ -851,12 +909,12 @@ function buildDecorations(state) {
   if (frontmatterMatch) {
     const from = 0;
     const to = frontmatterMatch[0].length;
+    replacedBlockRanges.push({ from, to });
     if (!isRangeActive(from, to)) {
       decorations.push(Decoration.replace({
         widget: new PropertiesWidget(frontmatterMatch[1], from, to),
         block: true
       }).range(from, to));
-      replacedBlockRanges.push({ from, to });
     }
   }
 
@@ -880,13 +938,13 @@ function buildDecorations(state) {
     const lang = cbMatch[1].trim();
     const code = cbMatch[2];
 
+    replacedBlockRanges.push({ from, to });
     if (!isRangeActive(from, to)) {
       decorations.push(Decoration.replace({
         widget: new CodeBlockWidget(lang, code, from, to),
         block: true
       }).range(from, to));
     }
-    replacedBlockRanges.push({ from, to });
   }
 
   // ── C. Block Math ($$...$$) across document ──
@@ -901,12 +959,12 @@ function buildDecorations(state) {
 
     const mathContent = bMatch[1].trim();
 
+    replacedBlockRanges.push({ from: lineFrom, to: lineTo });
     if (!isRangeActive(lineFrom, lineTo)) {
       decorations.push(Decoration.replace({
         widget: new KatexBlockWidget(mathContent, lineFrom, lineTo),
         block: true
       }).range(lineFrom, lineTo));
-      replacedBlockRanges.push({ from: lineFrom, to: lineTo });
     } else {
       // While actively editing inside $$...$$, render live preview right below closing line
       decorations.push(Decoration.widget({
@@ -933,12 +991,12 @@ function buildDecorations(state) {
     }
     to = doc.lineAt(to).to;
 
+    replacedBlockRanges.push({ from, to });
     if (!isRangeActive(from, to)) {
       decorations.push(Decoration.replace({
         widget: new TableWidget(tbMatch[0], from, to),
         block: true
       }).range(from, to));
-      replacedBlockRanges.push({ from, to });
     }
   }
 
@@ -1159,7 +1217,7 @@ function buildDecorations(state) {
       const isFrontmatter = frontmatterMatch && line.from <= frontmatterMatch[0].length;
       if (!isFrontmatter && !lineActive) {
         decorations.push(Decoration.replace({
-          widget: new HrWidget(),
+          widget: new HrWidget(line.from),
           block: true
         }).range(line.from, line.to));
       }
