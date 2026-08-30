@@ -103,6 +103,15 @@ export default function LectureCard({
     onDelete?.(id);
   };
 
+  const activeStyle = {
+    backgroundColor: 'var(--color-surface-overlay)',
+    borderColor: 'rgba(99,102,241,0.45)',
+  };
+  const inactiveStyle = {
+    backgroundColor: 'transparent',
+    borderColor: 'var(--color-border)',
+  };
+
   return (
     <div
       role="button"
@@ -113,15 +122,18 @@ export default function LectureCard({
       onKeyDown={(e) => {
         if (e.key === 'Enter' && !isEditing) onClick?.();
       }}
-      className={`group relative w-full text-left p-3 rounded-lg border transition-all cursor-pointer select-none ${
-        active 
-          ? 'bg-surface-overlay border-primary/50 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]' 
-          : 'bg-surface-alt border-border/50 hover:bg-surface-overlay hover:border-border'
-      }`}
+      style={active ? activeStyle : inactiveStyle}
+      className="group relative w-full text-left p-2.5 rounded-lg border transition-all cursor-pointer select-none"
+      onMouseEnter={e => { if (!active) { e.currentTarget.style.backgroundColor = 'var(--color-surface-overlay)'; } }}
+      onMouseLeave={e => { if (!active) { e.currentTarget.style.backgroundColor = 'transparent'; } }}
     >
       <div className="flex items-start justify-between gap-2">
         <div className="flex items-center gap-2 flex-1 min-w-0">
-          <FileAudio size={16} className={active ? 'text-primary-light shrink-0' : 'text-text-muted shrink-0'} />
+          <FileAudio
+            size={14}
+            className="shrink-0"
+            style={{ color: active ? '#818CF8' : 'var(--color-text-muted)' }}
+          />
           
           {isEditing ? (
             <div className="flex items-center gap-1 w-full" onClick={(e) => e.stopPropagation()}>
@@ -134,25 +146,21 @@ export default function LectureCard({
                   if (e.key === 'Enter') handleSaveRename(e);
                   if (e.key === 'Escape') handleCancelRename(e);
                 }}
-                className="w-full bg-surface border border-primary/60 rounded px-1.5 py-0.5 text-xs text-text focus:outline-none focus:ring-1 focus:ring-primary"
+                className="w-full rounded px-1.5 py-0.5 text-xs focus:outline-none"
+                style={{ background: 'var(--color-surface)', border: '1px solid rgba(99,102,241,0.6)', color: 'var(--color-text)' }}
               />
-              <button
-                onClick={handleSaveRename}
-                className="p-1 hover:bg-primary/20 text-primary-light rounded transition-colors"
-                title="Save"
-              >
-                <Check size={14} weight="bold" />
+              <button onClick={handleSaveRename} className="p-1 rounded transition-colors" title="Save" style={{ color: '#818CF8' }}>
+                <Check size={13} weight="bold" />
               </button>
-              <button
-                onClick={handleCancelRename}
-                className="p-1 hover:bg-red-500/20 text-text-muted hover:text-red-400 rounded transition-colors"
-                title="Cancel"
-              >
-                <X size={14} weight="bold" />
+              <button onClick={handleCancelRename} className="p-1 rounded transition-colors" title="Cancel" style={{ color: 'var(--color-text-muted)' }}>
+                <X size={13} weight="bold" />
               </button>
             </div>
           ) : (
-            <h3 className={`text-sm font-medium truncate ${active ? 'text-text' : 'text-text-muted group-hover:text-text'}`}>
+            <h3
+              className="text-xs font-medium truncate"
+              style={{ color: active ? 'var(--color-text)' : 'var(--color-text-secondary)' }}
+            >
               {title}
             </h3>
           )}
@@ -173,35 +181,40 @@ export default function LectureCard({
 
             {/* Dropdown Menu */}
             {isMenuOpen && (
-              <div 
-                className="absolute right-0 top-full mt-1.5 w-48 border border-border/80 rounded-xl shadow-2xl p-1 z-50"
-                style={{ backgroundColor: 'var(--color-surface, #0F172A)' }}
+              <div
+                className="absolute right-0 top-full mt-1 w-44 rounded-xl shadow-2xl p-1 z-50"
+                style={{
+                  backgroundColor: 'var(--color-surface-alt)',
+                  border: '1px solid var(--color-border-subtle)',
+                }}
                 onClick={(e) => e.stopPropagation()}
               >
                 <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setIsMenuOpen(false);
-                    setIsEditing(true);
-                  }}
-                  className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-medium text-text hover:bg-surface-overlay rounded-lg transition-colors text-left cursor-pointer"
+                  onClick={(e) => { e.stopPropagation(); setIsMenuOpen(false); setIsEditing(true); }}
+                  className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs font-medium rounded-lg transition-colors text-left cursor-pointer"
+                  style={{ color: 'var(--color-text)' }}
+                  onMouseEnter={e => e.currentTarget.style.backgroundColor = 'var(--color-surface-overlay)'}
+                  onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'}
                 >
-                  <PencilSimple size={15} className="text-text-muted shrink-0" />
+                  <PencilSimple size={13} style={{ color: 'var(--color-text-muted)' }} className="shrink-0" />
                   <span>Rename</span>
                 </button>
 
                 <button
                   onClick={handleCopyMarkdown}
-                  className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-medium text-text hover:bg-surface-overlay rounded-lg transition-colors text-left cursor-pointer"
+                  className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs font-medium rounded-lg transition-colors text-left cursor-pointer"
+                  style={{ color: 'var(--color-text)' }}
+                  onMouseEnter={e => e.currentTarget.style.backgroundColor = 'var(--color-surface-overlay)'}
+                  onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'}
                 >
                   {copied ? (
                     <>
-                      <Check size={15} className="text-emerald-400 shrink-0" weight="bold" />
+                      <Check size={13} className="text-emerald-400 shrink-0" weight="bold" />
                       <span className="text-emerald-400 font-semibold">Copied!</span>
                     </>
                   ) : (
                     <>
-                      <Copy size={15} className="text-text-muted shrink-0" />
+                      <Copy size={13} style={{ color: 'var(--color-text-muted)' }} className="shrink-0" />
                       <span>Copy Markdown</span>
                     </>
                   )}
@@ -209,19 +222,24 @@ export default function LectureCard({
 
                 <button
                   onClick={handleDownload}
-                  className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-medium text-text hover:bg-surface-overlay rounded-lg transition-colors text-left cursor-pointer"
+                  className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs font-medium rounded-lg transition-colors text-left cursor-pointer"
+                  style={{ color: 'var(--color-text)' }}
+                  onMouseEnter={e => e.currentTarget.style.backgroundColor = 'var(--color-surface-overlay)'}
+                  onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'}
                 >
-                  <DownloadSimple size={15} className="text-text-muted shrink-0" />
+                  <DownloadSimple size={13} style={{ color: 'var(--color-text-muted)' }} className="shrink-0" />
                   <span>Download (.md)</span>
                 </button>
 
-                <div className="h-px bg-border/60 my-1 mx-1" />
+                <div className="h-px my-1 mx-1" style={{ backgroundColor: 'var(--color-border)' }} />
 
                 <button
                   onClick={handleDelete}
-                  className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-medium text-red-400 hover:bg-red-500/15 rounded-lg transition-colors text-left cursor-pointer"
+                  className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs font-medium text-red-400 rounded-lg transition-colors text-left cursor-pointer"
+                  onMouseEnter={e => e.currentTarget.style.backgroundColor = 'rgba(239,68,68,0.1)'}
+                  onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'}
                 >
-                  <Trash size={15} className="shrink-0" />
+                  <Trash size={13} className="shrink-0" />
                   <span>Delete Mindmap</span>
                 </button>
               </div>
@@ -231,9 +249,9 @@ export default function LectureCard({
         )}
       </div>
 
-      <div className="flex items-center gap-2 mt-2 text-[11px] text-text-muted">
+      <div className="flex items-center gap-1.5 mt-1.5 text-[10px]" style={{ color: 'var(--color-text-muted)' }}>
         <span>{date}</span>
-        <span>&middot;</span>
+        <span>·</span>
         <span>{duration}</span>
       </div>
     </div>

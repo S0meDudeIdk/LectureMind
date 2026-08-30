@@ -1,22 +1,22 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;1,400&display=swap');
 @import "tailwindcss";
 
 /* ── Tailwind v4: CSS-first design tokens ── */
 @theme {
   --font-sans: 'Inter', ui-sans-serif, system-ui, sans-serif;
-  --radius-sm: 0.5rem;
-  --radius-md: 0.75rem;
-  --radius-lg: 1rem;
-  --radius-xl: 1.5rem;
+  --radius-sm: 0.375rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.75rem;
+  --radius-xl: 1rem;
 
-  /* Brand (theme-invariant) */
-  --color-primary: #4F46E5;
+  /* Brand accents (theme-invariant) */
+  --color-primary: #6366F1;
   --color-primary-light: #818CF8;
-  --color-accent: #06B6D4;
-  --color-accent-light: #22D3EE;
+  --color-accent: #10B981;
+  --color-accent-light: #34D399;
   --color-danger: #EF4444;
 
-  /* Semantic surface & text colors mapped to CSS variables */
+  /* Semantic tokens - resolved per theme below */
   --color-surface: var(--color-surface);
   --color-surface-alt: var(--color-surface-alt);
   --color-surface-overlay: var(--color-surface-overlay);
@@ -25,36 +25,65 @@
   --color-border: var(--color-border);
 }
 
-
-/* ── Dark mode tokens (default) ── */
+/* ── Dark Mode tokens (default) — #13131a NeetCode canvas ── */
 :root {
-  --color-surface: #0F172A;
-  --color-surface-alt: #1E293B;
-  --color-surface-overlay: #334155;
-  --color-text: #F1F5F9;
-  --color-text-muted: #94A3B8;
-  --color-border: #334155;
-  --lm-node-text: #F8FAFC;
-  --lm-node-bg: rgba(30, 41, 59, 0.85);
-  --lm-node-border: rgba(100, 116, 139, 0.6);
+  --color-surface: #13131a;        /* NeetCode near-black canvas */
+  --color-surface-alt: #1a1a25;    /* panels / sidebar */
+  --color-surface-overlay: #22222e; /* hover states, inputs */
+  --color-surface-panel: #1a1a25;
+  --color-text: #e8e8f0;           /* slightly warm white */
+  --color-text-muted: #5c5c7a;     /* muted purple-gray */
+  --color-text-secondary: #8888a8; /* secondary labels */
+  --color-border: rgba(255, 255, 255, 0.12);         /* thin crisp white border in dark mode */
+  --color-border-subtle: rgba(255, 255, 255, 0.08);  /* subtle divider */
+
+  /* Mindmap node tokens — NeetCode periwinkle */
+  --lm-node-text: #c4c2e8;
+  --lm-node-bg: rgba(62, 58, 130, 0.68);
+  --lm-node-border: rgba(110, 100, 210, 0.42);
+  --lm-node-root-bg: rgba(72, 68, 148, 0.88);
+  --lm-node-root-border: rgba(135, 125, 248, 0.62);
+
+  /* Dot grid — slightly more visible than before */
+  --dot-color: rgba(255, 255, 255, 0.055);
 }
 
-/* ── Light mode tokens ── */
+/* ── Light Mode tokens — clean white canvas ── */
 :root.light {
-  --color-surface: #F8FAFC;
-  --color-surface-alt: #F1F5F9;
-  --color-surface-overlay: #E2E8F0;
-  --color-text: #0F172A;
-  --color-text-muted: #64748B;
-  --color-border: #CBD5E1;
-  --lm-node-text: #0F172A;
-  --lm-node-bg: rgba(241, 245, 249, 0.95);
-  --lm-node-border: rgba(203, 213, 225, 0.85);
+  --color-surface: #ffffff;        /* pure white canvas */
+  --color-surface-alt: #f8fafc;    /* panels */
+  --color-surface-overlay: #f1f5f9; /* hover states */
+  --color-surface-panel: #ffffff;
+  --color-text: #0f172a;           /* dark slate */
+  --color-text-muted: #64748b;
+  --color-text-secondary: #475569;
+  --color-border: rgba(0, 0, 0, 0.12);         /* thin crisp black border in light mode */
+  --color-border-subtle: rgba(0, 0, 0, 0.07);  /* subtle divider */
+
+  /* Mindmap node tokens — light periwinkle tint */
+  --lm-node-text: #2a2460;
+  --lm-node-bg: rgba(210, 205, 255, 0.80);
+  --lm-node-border: rgba(100, 90, 200, 0.38);
+  --lm-node-root-bg: rgba(190, 185, 255, 0.92);
+  --lm-node-root-border: rgba(80, 70, 180, 0.55);
+
+  /* Dot grid — dark dots on light canvas */
+  --dot-color: rgba(80, 70, 160, 0.07);
 }
 
-/* ── Global base styles ── */
+/* ── Global base ── */
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+html, body {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
 body {
-  font-family: var(--font-sans);
+  font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
   background-color: var(--color-surface);
   color: var(--color-text);
   -webkit-font-smoothing: antialiased;
@@ -62,42 +91,64 @@ body {
   transition: background-color 0.2s ease, color 0.2s ease;
 }
 
-/* ── Scrollbar styling ── */
-::-webkit-scrollbar { width: 6px; }
+/* ── Dot Grid Canvas Background ── */
+.canvas-bg {
+  background-color: var(--color-surface);
+  background-image: radial-gradient(circle, var(--dot-color) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+
+/* ── Sidebar collapse transition ── */
+.duration-250 {
+  transition-duration: 250ms;
+}
+
+
+/* ── Scrollbar ── */
+::-webkit-scrollbar { width: 5px; height: 5px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb {
   background: var(--color-surface-overlay);
-  border-radius: 3px;
+  border-radius: 99px;
 }
-::-webkit-scrollbar-thumb:hover { background: var(--color-text-muted); }
+::-webkit-scrollbar-thumb:hover { background: var(--color-border-subtle); }
 
-/* ── Markmap Mindmap Architecture ── */
+/* ── Tailwind v4 – border color token ── */
+@layer base {
+  * {
+    border-color: var(--color-border);
+  }
+}
+
+/* ─────────────────────────────────────────────
+   MARKMAP MINDMAP
+───────────────────────────────────────────── */
 svg.markmap,
 svg[id^="markmap"] {
   background: transparent !important;
   overflow: visible !important;
 }
 
-/* Thicker, high-contrast connector curves */
+/* Thin bezier connector links */
 .markmap-link {
-  stroke-width: 2.5px !important;
-  stroke-opacity: 0.85 !important;
+  stroke-width: 1.8px !important;
+  stroke-opacity: 0.55 !important;
 }
 
-/* Hide the default bottom underline */
+/* Hide default bottom underline */
 .markmap-node > line {
   stroke-opacity: 0 !important;
   display: none !important;
 }
 
-/* Branch toggle circle dot */
+/* Branch toggle circle */
 .markmap-node > circle {
-  stroke-width: 2px !important;
-  r: 5px !important;
+  stroke-width: 1.5px !important;
+  r: 4px !important;
   cursor: pointer !important;
 }
 
-/* Markmap HTML ForeignObject Container */
+/* ForeignObject container */
 .markmap-foreign {
   overflow: visible !important;
   display: inline-block !important;
@@ -106,47 +157,358 @@ svg[id^="markmap"] {
 .markmap-foreign > div {
   width: auto !important;
   display: inline-block !important;
-  transform: translate(-10px, 42%) !important; /* Shifted left to clear the circle dot and align incoming curves */
+  transform: translate(-10px, 42%) !important;
 }
 
-
-/* The actual rounded bubble card containing the text */
+/* Flat rounded rectangle node cards — NeetCode style */
 .markmap-foreign > div > div {
   display: inline-flex !important;
   align-items: center !important;
   justify-content: center !important;
   box-sizing: border-box !important;
-  padding: 4px 10px !important;
-  border-radius: 8px !important;
+  padding: 4px 12px !important;
+  border-radius: 6px !important;           /* rounded-md */
   font-family: 'Inter', ui-sans-serif, system-ui, sans-serif !important;
-  font-size: 13px !important;
+  font-size: 12.5px !important;
   font-weight: 500 !important;
-  line-height: 1.3 !important;
-
+  line-height: 1.4 !important;
   white-space: nowrap !important;
   color: var(--lm-node-text) !important;
   background-color: var(--lm-node-bg) !important;
-  border: 1.5px solid var(--lm-node-border) !important;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12) !important;
-  transition: all 0.2s ease !important;
+  border: 1px solid var(--lm-node-border) !important;
+  box-shadow: none !important;
+  transition: background-color 0.15s ease, border-color 0.15s ease !important;
 }
 
-/* Root level card emphasis */
+/* Root level: slightly larger, more prominent */
 g[data-depth="0"] .markmap-foreign > div > div {
-  font-size: 15px !important;
+  font-size: 14px !important;
   font-weight: 700 !important;
-  padding: 8px 16px !important;
-  border-radius: 12px !important;
+  padding: 6px 16px !important;
+  border-radius: 8px !important;
+  background-color: var(--lm-node-root-bg) !important;
+  border-color: var(--lm-node-root-border) !important;
 }
 
-/* Level 1 subtopics emphasis */
+/* Level 1 subtopics */
 g[data-depth="1"] .markmap-foreign > div > div {
   font-weight: 600 !important;
+  font-size: 13px !important;
 }
 
-/* Tailwind v4 – expose CSS vars as utilities */
-@layer base {
-  * {
-    border-color: var(--color-border);
-  }
+/* ─────────────────────────────────────────────
+   CODEMIRROR (Note Editor Theme — Modern Slate & Obsidian)
+───────────────────────────────────────────── */
+.cm-editor {
+  height: 100% !important;
 }
+
+.cm-scroller {
+  font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif !important;
+  font-size: 14.5px !important;
+  line-height: 1.7 !important;
+}
+
+/* Modern Dark Mode (default) */
+html:not(.light) .cm-editor,
+html:not(.light) .cm-scroller,
+html:not(.light) .cm-content {
+  background-color: #13131a !important;
+  color: #e2e8f0 !important;
+}
+
+html:not(.light) .cm-gutters {
+  background-color: #1a1a25 !important;
+  color: #64748b !important;
+  border-right: 1px solid rgba(255, 255, 255, 0.08) !important;
+}
+
+html:not(.light) .cm-line {
+  color: #e2e8f0 !important;
+}
+
+html:not(.light) .cm-activeLine {
+  background-color: rgba(255, 255, 255, 0.025) !important;
+}
+
+html:not(.light) .cm-activeLineGutter {
+  background-color: #22222e !important;
+  color: #e2e8f0 !important;
+}
+
+/* Modern Light Mode — Pure Crisp White */
+html.light .cm-editor,
+html.light .cm-scroller,
+html.light .cm-content {
+  background-color: #ffffff !important;
+  color: #0f172a !important;
+}
+
+html.light .cm-gutters {
+  background-color: #f8fafc !important;
+  color: #94a3b8 !important;
+  border-right: 1px solid #e2e8f0 !important;
+}
+
+html.light .cm-line {
+  color: #0f172a !important;
+}
+
+html.light .cm-activeLine {
+  background-color: #f8fafc !important;
+}
+
+html.light .cm-activeLineGutter {
+  background-color: #f1f5f9 !important;
+  color: #0f172a !important;
+}
+
+/* Text selection (character-hugging) */
+html.light .cm-editor ::selection,
+html.light .cm-content ::selection,
+html.light .cm-line ::selection {
+  background-color: rgba(99, 102, 241, 0.20) !important;
+}
+
+html:not(.light) .cm-editor ::selection,
+html:not(.light) .cm-content ::selection,
+html:not(.light) .cm-line ::selection {
+  background-color: rgba(99, 102, 241, 0.35) !important;
+}
+
+/* Headings: Pure White in Dark Mode, Slate in Light Mode */
+html:not(.light) .cm-h1,
+html:not(.light) .cm-h2,
+html:not(.light) .cm-h3,
+html:not(.light) .cm-h4,
+html:not(.light) .cm-h5,
+html:not(.light) .cm-h6,
+html:not(.light) .cm-h1 *,
+html:not(.light) .cm-h2 *,
+html:not(.light) .cm-h3 *,
+html:not(.light) .cm-h4 *,
+html:not(.light) .cm-h5 *,
+html:not(.light) .cm-h6 *,
+html:not(.light) .cm-line.cm-h1,
+html:not(.light) .cm-line.cm-h2,
+html:not(.light) .cm-line.cm-h3,
+html:not(.light) .cm-line.cm-h4,
+html:not(.light) .cm-line.cm-h5,
+html:not(.light) .cm-line.cm-h6,
+html:not(.light) .cm-line.cm-h1 *,
+html:not(.light) .cm-line.cm-h2 *,
+html:not(.light) .cm-line.cm-h3 *,
+html:not(.light) .cm-line.cm-h4 *,
+html:not(.light) .cm-line.cm-h5 *,
+html:not(.light) .cm-line.cm-h6 * {
+  color: #ffffff !important;
+}
+
+html.light .cm-h1,
+html.light .cm-h2,
+html.light .cm-h3,
+html.light .cm-h4,
+html.light .cm-h5,
+html.light .cm-h6,
+html.light .cm-h1 *,
+html.light .cm-h2 *,
+html.light .cm-h3 *,
+html.light .cm-h4 *,
+html.light .cm-h5 *,
+html.light .cm-h6 *,
+html.light .cm-line.cm-h1,
+html.light .cm-line.cm-h2,
+html.light .cm-line.cm-h3,
+html.light .cm-line.cm-h4,
+html.light .cm-line.cm-h5,
+html.light .cm-line.cm-h6,
+html.light .cm-line.cm-h1 *,
+html.light .cm-line.cm-h2 *,
+html.light .cm-line.cm-h3 *,
+html.light .cm-line.cm-h4 *,
+html.light .cm-line.cm-h5 *,
+html.light .cm-line.cm-h6 * {
+  color: #0f172a !important;
+}
+
+/* ─────────────────────────────────────────────
+   TASK CHECKBOXES
+───────────────────────────────────────────── */
+.cm-task-checkbox-wrap {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: flex-start !important;
+  vertical-align: -0.14em !important;
+  line-height: 1 !important;
+  width: 24px !important;
+  min-width: 24px !important;
+  margin-right: 0 !important;
+  padding: 0 !important;
+}
+
+/* Hide markdown task prefix characters (- [ ] ) cleanly in DOM without breaking text stream or collapsing caret */
+.cm-task-syntax-hide {
+  display: inline-block !important;
+  width: 0px !important;
+  height: 1.2em !important;
+  font-size: inherit !important;
+  line-height: inherit !important;
+  color: transparent !important;
+  overflow: hidden !important;
+  vertical-align: text-bottom !important;
+  pointer-events: none !important;
+  white-space: nowrap !important;
+}
+
+.cm-task-checkbox-box {
+  width: 15px !important;
+  height: 15px !important;
+  border-radius: 3.5px !important;
+  border: 1.2px solid rgba(0, 0, 0, 0.65) !important; /* Visible crisp black border in Light Mode */
+  background-color: transparent !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  transition: all 0.15s ease !important;
+  box-sizing: border-box !important;
+}
+
+html:not(.light) .cm-task-checkbox-box {
+  border: 1.2px solid rgba(255, 255, 255, 0.45) !important; /* Crisp thin white border in Dark Mode */
+  background-color: transparent !important;
+}
+
+.cm-task-checkbox-box:hover {
+  border-color: #000000 !important;
+}
+
+html:not(.light) .cm-task-checkbox-box:hover {
+  border-color: #ffffff !important;
+}
+
+.cm-task-checkbox-box.is-checked {
+  background-color: #6366f1 !important;
+  border-color: #6366f1 !important;
+  color: #ffffff !important;
+}
+
+.cm-task-checkbox-box.is-canceled {
+  background-color: rgba(239, 68, 68, 0.2) !important;
+  border-color: #f87171 !important;
+  color: #f87171 !important;
+}
+
+.cm-task-checkbox-box.is-in-progress {
+  background-color: rgba(245, 158, 11, 0.2) !important;
+  border-color: #fbbf24 !important;
+  color: #fbbf24 !important;
+}
+
+/* ─────────────────────────────────────────────
+   KATEX MATH
+───────────────────────────────────────────── */
+.katex {
+  font-size: 1.06em;
+  color: inherit;
+}
+
+.katex-block {
+  padding: 0.75rem 1rem;
+  background-color: var(--color-surface-alt);
+  border: 1px solid var(--color-border);
+  border-radius: 0.5rem;
+  margin: 0.75rem 0;
+}
+
+/* ─────────────────────────────────────────────
+   TIPTAP EDITOR
+───────────────────────────────────────────── */
+.tiptap {
+  outline: none;
+  min-height: 380px;
+}
+
+.tiptap p { margin-bottom: 0.75rem; line-height: 1.7; }
+.tiptap h1 { font-size: 1.75rem; font-weight: 700; letter-spacing: -0.025em; color: var(--color-text); margin-top: 1.25rem; margin-bottom: 0.75rem; }
+.tiptap h2 { font-size: 1.35rem; font-weight: 600; letter-spacing: -0.02em; color: var(--color-text); margin-top: 1.25rem; margin-bottom: 0.5rem; }
+.tiptap h3 { font-size: 1.1rem; font-weight: 600; color: var(--color-text); margin-top: 1rem; margin-bottom: 0.4rem; }
+.tiptap ul { list-style-type: disc; padding-left: 1.5rem; margin: 0.6rem 0; }
+.tiptap ol { list-style-type: decimal; padding-left: 1.5rem; margin: 0.6rem 0; }
+.tiptap li { margin-bottom: 0.3rem; line-height: 1.6; }
+.tiptap blockquote { border-left: 3px solid var(--color-primary); padding-left: 1rem; font-style: italic; color: var(--color-text-muted); margin: 0.85rem 0; }
+.tiptap code { background: var(--color-surface-overlay); color: var(--color-accent-light); padding: 0.2rem 0.4rem; border-radius: 0.3rem; font-family: ui-monospace, monospace; font-size: 0.875em; }
+.tiptap pre { background: var(--color-surface-alt); border: 1px solid var(--color-border); padding: 1rem; border-radius: 0.5rem; overflow-x: auto; margin: 0.85rem 0; }
+
+/* ─────────────────────────────────────────────
+   VISUAL NOTE CONTENT TYPOGRAPHY & OBSIDIAN STYLING
+───────────────────────────────────────────── */
+.note-visual-content h1 {
+  font-size: 1.85rem; font-weight: 800; letter-spacing: -0.025em;
+  color: var(--color-text); margin-top: 1.6rem; margin-bottom: 0.75rem;
+  padding-bottom: 0.35rem; border-bottom: 1px solid var(--color-border);
+}
+.note-visual-content h2 {
+  font-size: 1.45rem; font-weight: 700; letter-spacing: -0.02em;
+  color: var(--color-text); margin-top: 1.4rem; margin-bottom: 0.6rem;
+}
+.note-visual-content h3 {
+  font-size: 1.2rem; font-weight: 650;
+  color: var(--color-text); margin-top: 1.1rem; margin-bottom: 0.4rem;
+}
+.note-visual-content p { margin-bottom: 0.85rem; line-height: 1.75; }
+.note-visual-content ul { list-style-type: disc; padding-left: 1.5rem; margin: 0.6rem 0 0.85rem 0; }
+.note-visual-content ol { list-style-type: decimal; padding-left: 1.5rem; margin: 0.6rem 0 0.85rem 0; }
+.note-visual-content li { margin-bottom: 0.35rem; line-height: 1.65; }
+.note-visual-content blockquote {
+  border-left: 3px solid var(--color-primary); padding: 0.6rem 1rem;
+  font-style: italic; color: var(--color-text-muted);
+  background: var(--color-surface-alt);
+  border-radius: 0 0.375rem 0.375rem 0; margin: 1rem 0;
+}
+.note-visual-content code:not(pre code) {
+  background: var(--color-surface-overlay); color: var(--color-accent-light);
+  padding: 0.2rem 0.4rem; border-radius: 0.3rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 0.875em;
+}
+.note-visual-content pre {
+  background: var(--color-surface-alt); border: 1px solid var(--color-border);
+  padding: 1rem; border-radius: 0.5rem; overflow-x: auto; margin: 1rem 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.875rem; line-height: 1.6;
+}
+.note-visual-content table { width: 100%; border-collapse: collapse; margin: 1rem 0; }
+.note-visual-content th,
+.note-visual-content td { border: 1px solid var(--color-border); padding: 0.6rem 0.85rem; text-align: left; }
+.note-visual-content th { background: var(--color-surface-alt); font-weight: 600; }
+.note-visual-content hr { border: none; border-top: 1px solid var(--color-border); margin: 1.5rem 0; }
+
+/* ── Obsidian Live Preview CodeMirror & Callouts ── */
+.obsidian-callout-card {
+  border-left: 4px solid var(--callout-color, var(--color-primary));
+  background-color: var(--callout-bg, rgba(99, 102, 241, 0.05));
+  border-radius: 0.5rem;
+  margin: 1rem 0;
+  padding: 0.75rem 1rem;
+}
+.obsidian-highlight {
+  background-color: rgba(250, 189, 47, 0.24);
+  color: #fabd2f;
+  border-radius: 3px;
+  padding: 1px 4px;
+}
+:root.light .obsidian-highlight {
+  background-color: rgba(181, 118, 20, 0.2);
+  color: #af3a03;
+}
+.obsidian-tag-pill {
+  transition: all 0.15s ease;
+}
+.obsidian-tag-pill:hover {
+  filter: brightness(1.15);
+  transform: translateY(-1px);
+}
+.cm-task-completed {
+  text-decoration: line-through;
+  opacity: 0.65;
+}
+
