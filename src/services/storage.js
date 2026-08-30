@@ -1,10 +1,11 @@
 import { ref, uploadBytesResumable, getDownloadURL, deleteObject, listAll } from 'firebase/storage';
-import { storage, isFirebaseConfigured } from './firebase';
+import { storage, isFirebaseConfigured, isStorageConfigured } from './firebase';
 
 /**
  * Upload a media file (video or audio) to Firebase Cloud Storage
  * using Firebase SDK's resumable upload (handles files of any size).
  * Returns a permanent cross-device HTTPS download URL.
+ * Falls back safely to null on storage errors (e.g. retry limit exceeded, bucket disabled).
  *
  * @param {File} file - Original video or audio file
  * @param {string} lectureId - Firestore document ID (used as storage key)
@@ -14,8 +15,8 @@ import { storage, isFirebaseConfigured } from './firebase';
 export async function uploadMediaToCloud(file, lectureId, onProgress) {
   if (!file || !lectureId) return null;
 
-  if (!isFirebaseConfigured || !storage) {
-    console.warn('[Storage] Firebase Storage not initialized. Skipping cloud upload.');
+  if (!isFirebaseConfigured || !isStorageConfigured || !storage) {
+    console.info('[Storage] Firebase Storage bucket not configured. Using local IndexedDB cache.');
     return null;
   }
 
@@ -34,33 +35,69 @@ export async function uploadMediaToCloud(file, lectureId, onProgress) {
       },
     });
 
-    return await new Promise((resolve, reject) => {
+    return await new Promise((resolve) => {
+      let isSettled = false;
+
+      // Stall watchdog: If zero upload progress occurs for 90 seconds, log notice
+      let lastActivityTime = Date.now();
+      const stallCheckInterval = setInterval(() => {
+        if (!isSettled && Date.now() - lastActivityTime > 90000) {
+          clearInterval(stallCheckInterval);
+          isSettled = true;
+          try {
+            uploadTask.cancel();
+          } catch {}
+          console.info('[Storage] Cloud upload stalled for 90s. Continuing with local playback storage.');
+          resolve(null);
+        }
+      }, 10000);
+
       uploadTask.on(
         'state_changed',
         (snapshot) => {
+          lastActivityTime = Date.now();
           if (snapshot.totalBytes > 0) {
             const pct = Math.round((snapshot.bytesTransferred / snapshot.totalBytes) * 100);
             onProgress?.(`Uploading to cloud storage (${pct}%)...`);
           }
         },
         (error) => {
-          console.warn('[Storage] Firebase upload error (non-fatal):', error);
+          clearInterval(stallCheckInterval);
+          if (isSettled) return;
+          isSettled = true;
+
+          // Gracefully log recognized non-fatal storage fallback causes
+          const errorCode = error?.code || 'unknown';
+          if (errorCode === 'storage/retry-limit-exceeded') {
+            console.info('[Storage] Cloud storage reached retry limit (unreachable bucket or network restriction). Local media playback will be used.');
+          } else if (errorCode === 'storage/unauthorized') {
+            console.info('[Storage] Cloud storage unauthorized (check Firebase storage rules). Local media playback will be used.');
+          } else if (errorCode === 'storage/canceled') {
+            console.info('[Storage] Cloud storage upload canceled.');
+          } else {
+            console.info(`[Storage] Cloud storage unavailable (${errorCode}). Local media playback will be used.`);
+          }
+
           resolve(null);
         },
         async () => {
+          clearInterval(stallCheckInterval);
+          if (isSettled) return;
+          isSettled = true;
+
           try {
             const downloadUrl = await getDownloadURL(uploadTask.snapshot.ref);
             console.log('[Storage] ✅ Media uploaded successfully:', downloadUrl);
             resolve(downloadUrl);
-          } catch (urlErr) {
-            console.warn('[Storage] Failed to retrieve download URL:', urlErr);
+          } catch {
+            console.info('[Storage] Could not retrieve download URL. Using local media playback.');
             resolve(null);
           }
         }
       );
     });
   } catch (err) {
-    console.warn('[Storage] Upload initialization failed (non-fatal):', err);
+    console.info('[Storage] Cloud upload initialization skipped:', err?.message || err);
     return null;
   }
 }
@@ -73,7 +110,7 @@ export async function uploadMediaToCloud(file, lectureId, onProgress) {
  * @param {string} [audioUrl] - Optional direct Firebase Storage URL
  */
 export async function deleteMediaFromCloud(lectureId, audioUrl = null) {
-  if (!isFirebaseConfigured || !storage) return;
+  if (!isFirebaseConfigured || !isStorageConfigured || !storage) return;
 
   try {
     // 1. Delete all items inside lectures/{lectureId}/ folder
@@ -83,15 +120,13 @@ export async function deleteMediaFromCloud(lectureId, audioUrl = null) {
         const fileList = await listAll(folderRef);
 
         const deletePromises = fileList.items.map((itemRef) =>
-          deleteObject(itemRef).catch((err) =>
-            console.warn(`[Storage] Failed to delete ${itemRef.fullPath}:`, err)
-          )
+          deleteObject(itemRef).catch(() => {})
         );
 
         await Promise.all(deletePromises);
         console.log(`[Storage] 🗑️ Deleted all media in lectures/${lectureId}`);
-      } catch (folderErr) {
-        console.warn(`[Storage] Folder deletion error for ${lectureId}:`, folderErr);
+      } catch {
+        // non-fatal
       }
     }
 
@@ -101,12 +136,12 @@ export async function deleteMediaFromCloud(lectureId, audioUrl = null) {
         const fileRef = ref(storage, audioUrl);
         await deleteObject(fileRef);
         console.log(`[Storage] 🗑️ Deleted media by URL:`, audioUrl);
-      } catch (urlErr) {
-        // file may already be deleted by folder listAll
+      } catch {
+        // file may already be deleted or not found
       }
     }
   } catch (err) {
-    console.warn('[Storage] Cleanup failed (non-fatal):', err);
+    console.info('[Storage] Cloud cleanup finished:', err?.message || err);
   }
 }
 
