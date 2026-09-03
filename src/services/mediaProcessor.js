@@ -79,12 +79,11 @@ function audioBufferToWavBlob(audioBuffer, targetSampleRate = 16000) {
 
 /**
  * Extract speech audio using Web Audio API.
- * For files <= 80MB: loads entire buffer into memory (safe).
- * For files > 80MB: falls back to MediaRecorder streaming (no RAM spike).
+ * For video files or large audio files <= 80MB: decodes audio to mono 16kHz WAV in browser.
  *
  * @param {File} file - Input video or audio file
  * @param {Function} [onProgress] - Status callback
- * @returns {Promise<File>} - Extracted speech audio File (or original on failure)
+ * @returns {Promise<File>} - Extracted/optimized speech audio File (or original on failure)
  */
 export async function extractSpeechAudio(file, onProgress) {
   if (!file) return file;
@@ -92,16 +91,16 @@ export async function extractSpeechAudio(file, onProgress) {
   const fileSizeMB = file.size / (1024 * 1024);
   const isVideo = file.type?.startsWith('video/') || /\.(mp4|mov|webm|mkv|avi|wmv)$/i.test(file.name || '');
 
-  // Pure audio files under 25MB: pass directly, no extraction needed
-  if (!isVideo && fileSizeMB < 25) {
+  // Pure audio files under 15MB: pass directly, no extraction needed
+  if (!isVideo && fileSizeMB < 15) {
     return file;
   }
 
   const AudioContextClass = window.AudioContext || window.webkitAudioContext;
 
-  // --- Strategy A: decodeAudioData (safe for small/medium files up to 80MB) ---
-  if (fileSizeMB <= 80 && AudioContextClass) {
-    onProgress?.("Extracting speech audio in browser...");
+  // --- Strategy: decodeAudioData & downmix to mono 16kHz speech WAV (safe for files up to 100MB) ---
+  if (fileSizeMB <= 100 && AudioContextClass) {
+    onProgress?.("Optimizing media audio for fast AI processing...");
     try {
       const arrayBuffer = await file.arrayBuffer();
       const audioCtx = new AudioContextClass();
@@ -111,29 +110,20 @@ export async function extractSpeechAudio(file, onProgress) {
 
       const audioFile = new File(
         [wavBlob],
-        file.name.replace(/\.[^/.]+$/, '') + '_speech.wav',
+        (file.name || 'lecture').replace(/\.[^/.]+$/, '') + '_speech.wav',
         { type: 'audio/wav' }
       );
-      console.log(`[MediaProcessor] Audio extracted: ${fileSizeMB.toFixed(1)} MB → ${(audioFile.size / 1024 / 1024).toFixed(1)} MB`);
-      return audioFile;
+
+      // For videos or when downmixed WAV is smaller than raw file, use optimized audio
+      if (isVideo || audioFile.size < file.size) {
+        console.log(`[MediaProcessor] Media audio optimized: ${fileSizeMB.toFixed(1)} MB → ${(audioFile.size / 1024 / 1024).toFixed(1)} MB`);
+        return audioFile;
+      }
     } catch (err) {
-      console.warn('[MediaProcessor] decodeAudioData failed, trying MediaRecorder streaming:', err);
+      console.warn('[MediaProcessor] Browser audio decoding skipped or failed:', err);
     }
   }
 
-  // --- Strategy B: MediaRecorder streaming (for large files 80MB–500MB+, no RAM spike) ---
-  if (typeof MediaRecorder !== 'undefined') {
-    onProgress?.("Streaming audio extraction for large file...");
-    try {
-      const audioFile = await extractAudioViaMediaRecorder(file, onProgress);
-      if (audioFile) return audioFile;
-    } catch (err) {
-      console.warn('[MediaProcessor] MediaRecorder extraction failed:', err);
-    }
-  }
-
-  // --- Strategy C: Return raw file and let Gemini File API handle it ---
-  console.warn('[MediaProcessor] All audio extraction strategies failed. Using raw file for Gemini File API upload.');
   return file;
 }
 
@@ -309,19 +299,30 @@ export async function extractVideoKeyframes(file, maxFrames = 8, onProgress) {
     const fileUrl = URL.createObjectURL(file);
     video.src = fileUrl;
 
+    let isDone = false;
     const cleanup = () => {
+      if (isDone) return;
+      isDone = true;
       URL.revokeObjectURL(fileUrl);
       video.removeAttribute('src');
       video.load();
     };
 
+    const safetyTimeout = setTimeout(() => {
+      console.warn('[MediaProcessor] Video keyframe extraction timed out, proceeding with audio only.');
+      cleanup();
+      resolve([]);
+    }, 6000);
+
     video.onerror = () => {
+      clearTimeout(safetyTimeout);
       console.warn('[MediaProcessor] Video keyframe extraction failed, proceeding with audio only.');
       cleanup();
       resolve([]);
     };
 
     video.onloadedmetadata = async () => {
+      clearTimeout(safetyTimeout);
       const duration = video.duration;
       if (!duration || isNaN(duration) || duration <= 0) {
         cleanup();
@@ -348,8 +349,18 @@ export async function extractVideoKeyframes(file, maxFrames = 8, onProgress) {
       for (const time of timestamps) {
         try {
           await new Promise((seekResolve) => {
-            const onSeeked = () => {
+            let seekDone = false;
+            const finishSeek = () => {
+              if (seekDone) return;
+              seekDone = true;
               video.removeEventListener('seeked', onSeeked);
+              clearTimeout(seekTimer);
+              seekResolve();
+            };
+
+            const seekTimer = setTimeout(finishSeek, 2000);
+
+            const onSeeked = () => {
               try {
                 ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
                 const base64Jpeg = canvas.toDataURL('image/jpeg', 0.55).split(',')[1];
@@ -359,7 +370,7 @@ export async function extractVideoKeyframes(file, maxFrames = 8, onProgress) {
               } catch (e) {
                 console.warn('[MediaProcessor] Frame capture error:', e);
               }
-              seekResolve();
+              finishSeek();
             };
             video.addEventListener('seeked', onSeeked);
             video.currentTime = time;
