@@ -150,6 +150,7 @@ export default function MindmapViewer({
     };
     return () => {
       delete window.__lecturemind_fit_mindmap;
+      delete window.__lecturemind_markmap;
     };
   }, []);
 
@@ -158,6 +159,7 @@ export default function MindmapViewer({
     if (!markmapRef.current) {
       markmapRef.current = Markmap.create(svgRef.current, MARKMAP_OPTIONS);
     }
+    window.__lecturemind_markmap = markmapRef.current;
     if (markdown) {
       const { root } = transformer.transform(markdown);
       markmapRef.current.setData(root, MARKMAP_OPTIONS);

@@ -91,7 +91,9 @@ export function useAudioUpload() {
         console.info('[Storage] Background cloud upload not completed (using local media):', err?.message || err);
       });
 
-      const aiAnalysisPromise = generateLectureContent(file, (msg) => setProgressMsg(msg));
+      const aiAnalysisPromise = generateLectureContent(file, (msg) => setProgressMsg(msg), {
+        cloudUploadPromise,
+      });
 
       // Wait for AI analysis (primary — shows mindmap as soon as done)
       const {
