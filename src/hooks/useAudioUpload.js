@@ -68,31 +68,36 @@ export function useAudioUpload() {
         console.warn("Initial Firestore save failed:", saveErr);
       }
 
-      // 3. PARALLEL: Firebase Storage upload + Gemini AI analysis run simultaneously
+      // 3. Upload media to Firebase Storage and obtain the gs:// URI required
+      // by the server-side Vertex AI endpoint. AI generation cannot proceed
+      // without a valid cloud storage reference.
       const cloudUploadPromise = saved?.id && file
         ? uploadMediaToCloud(file, saved.id, (msg) => {
             setCloudUploadProgress(msg);
           })
         : Promise.resolve(null);
 
-      // ⚠️ CRITICAL: Wire cloud-upload handlers EAGERLY (before awaiting AI),
-      // so the banner clears even if AI analysis throws a timeout error.
-      cloudUploadPromise.then((cloudUrl) => {
-        setCloudUploadProgress(null);
-        if (cloudUrl && saved?.id) {
-          console.log('[Storage] Cloud URL ready — updating Firestore & playback URL');
-          setAudioUrl(cloudUrl);
-          updateMindmap(saved.id, { audioUrl: cloudUrl }).catch((e) =>
-            console.warn('[Storage] Firestore cloud URL update failed:', e)
-          );
-        }
-      }).catch((err) => {
-        setCloudUploadProgress(null);
-        console.info('[Storage] Background cloud upload not completed (using local media):', err?.message || err);
-      });
+      const cloudUploadResult = await cloudUploadPromise;
+      setCloudUploadProgress(null);
+
+      if (!cloudUploadResult?.gsUri) {
+        throw new Error(
+          'Cloud storage upload is required for AI generation, but it did not complete. ' +
+          'Please check your Firebase Storage configuration and try again.'
+        );
+      }
+
+      const { downloadUrl, gsUri } = cloudUploadResult;
+
+      setAudioUrl(downloadUrl);
+      if (saved?.id) {
+        updateMindmap(saved.id, { audioUrl: downloadUrl }).catch((e) =>
+          console.warn('[Storage] Firestore cloud URL update failed:', e)
+        );
+      }
 
       const aiAnalysisPromise = generateLectureContent(file, (msg) => setProgressMsg(msg), {
-        cloudUploadPromise,
+        gsUri,
       });
 
       // Wait for AI analysis (primary — shows mindmap as soon as done)

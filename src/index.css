@@ -1,6 +1,9 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;1,400&display=swap');
 @import "tailwindcss";
 
+/* App uses html.light for light mode; everything else is dark. */
+@custom-variant dark (&:where(html:not(.light), html:not(.light) *));
+
 /* ── Tailwind v4: CSS-first design tokens ── */
 @theme {
   --font-sans: 'Inter', ui-sans-serif, system-ui, sans-serif;

@@ -806,23 +806,23 @@ function highlightCode(code, lang = '') {
   const comments = [];
   html = html.replace(/(#.*$|\/\/.*$|\/\*[\s\S]*?\*\/)/gm, (match) => {
     const id = `___COMMENT_${comments.length}___`;
-    comments.push(`<span class="text-text-muted/60 italic">${match}</span>`);
+    comments.push(`<span class="text-text-muted/80 italic">${match}</span>`);
     return id;
   });
 
   const strings = [];
   html = html.replace(/(&quot;[\s\S]*?&quot;|'[\s\S]*?'|`[\s\S]*?`|"""[\s\S]*?"""|'''[\s\S]*?''')/g, (match) => {
     const id = `___STR_${strings.length}___`;
-    strings.push(`<span class="text-emerald-400 dark:text-[#b8bb26]">${match}</span>`);
+    strings.push(`<span class="text-emerald-600 dark:text-emerald-400">${match}</span>`);
     return id;
   });
 
-  html = html.replace(/\b(\d+(?:\.\d+)?)\b/g, '<span class="text-purple-400 dark:text-[#d3869b]">$1</span>');
+  html = html.replace(/\b(\d+(?:\.\d+)?)\b/g, '<span class="text-purple-600 dark:text-purple-400">$1</span>');
 
   const kwRegex = new RegExp(`\\b(${keywords.join('|')})\\b`, 'g');
-  html = html.replace(kwRegex, '<span class="text-rose-400 dark:text-[#fb4934] font-medium">$1</span>');
+  html = html.replace(kwRegex, '<span class="text-rose-600 dark:text-rose-400 font-medium">$1</span>');
 
-  html = html.replace(/\b([a-zA-Z_][a-zA-Z0-9_]*)(?=\s*\()/g, '<span class="text-blue-400 dark:text-[#83a598]">$1</span>');
+  html = html.replace(/\b([a-zA-Z_][a-zA-Z0-9_]*)(?=\s*\()/g, '<span class="text-blue-600 dark:text-blue-400">$1</span>');
 
   strings.forEach((str, i) => {
     html = html.replace(`___STR_${i}___`, str);
@@ -854,7 +854,7 @@ class CodeBlockWidget extends WidgetType {
 
   toDOM(view) {
     const container = document.createElement('div');
-    container.className = 'obsidian-code-block-widget block w-full rounded-xl border border-border/70 bg-surface-alt/90 dark:bg-[#1a1b26]/90 text-sm font-mono m-0 overflow-hidden shadow-xs relative group select-none cursor-pointer';
+    container.className = 'obsidian-code-block-widget block w-full rounded-xl border border-border/70 bg-surface-alt/90 text-sm font-mono m-0 overflow-hidden shadow-xs relative group select-none cursor-pointer';
 
     // Language badge on top right
     if (this.lang) {
