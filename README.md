@@ -14,7 +14,7 @@
 
 - **🎙️ Multi-Format Media Ingestion**:
   - Supports audio (`.mp3`, `.wav`, `.m4a`, `.aac`, `.ogg`) and video (`.mp4`, `.webm`, `.mov`).
-  - Dual-mode upload: fast inline processing for media under 20MB, and seamless **Gemini File API** upload with chunking for large recordings.
+  - Dual-mode upload: fast inline processing for media under 20MB, and Firebase Cloud Storage (`gs://`) references for large recordings processed via Vertex AI.
   - Built-in audio extraction and compressor pipeline for video files.
 
 - **🗺️ Interactive D3 / Markmap Mindmaps**:
@@ -50,7 +50,7 @@
 
 - **Frontend**: [React 19](https://react.dev/), [Vite](https://vitejs.dev/)
 - **Styling**: [Tailwind CSS v4](https://tailwindcss.com/)
-- **AI Model**: [Google Gemini 2.5 / 2.0 via `@google/generative-ai`](https://ai.google.dev/)
+- **AI Model**: [Google Gemini via Vertex AI / Gemini Enterprise Agent Platform (`@google/genai`)](https://cloud.google.com/gemini-enterprise-agent-platform)
 - **Mindmap Engine**: [`markmap-lib`](https://markmap.js.org/), [`markmap-view`](https://markmap.js.org/), and [D3.js](https://d3js.org/)
 - **Editor & Formatting**: [CodeMirror 6](https://codemirror.net/), [KaTeX](https://katex.org/), [Marked](https://marked.js.org/)
 - **Icons**: [@phosphor-icons/react](https://phosphoricons.com/)
@@ -64,9 +64,9 @@
 Create a `.env` file in the project root based on `.env.example`:
 
 ```env
-# Gemini API Key (Required for AI generation)
-VITE_GEMINI_API_KEY=your_gemini_api_key_here
-GEMINI_API_KEY=your_gemini_api_key_here
+# Vertex AI / Gemini Enterprise Agent Platform (Required for AI generation)
+GOOGLE_CLOUD_PROJECT=your_gcp_project_id
+GOOGLE_CLOUD_LOCATION=us-central1
 
 # Firebase Configuration (Required for cloud sync & authentication)
 VITE_FIREBASE_API_KEY=your_firebase_api_key

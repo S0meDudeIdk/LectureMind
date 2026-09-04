@@ -10,7 +10,7 @@ import { storage, isFirebaseConfigured, isStorageConfigured } from './firebase';
  * @param {File} file - Original video or audio file
  * @param {string} lectureId - Firestore document ID (used as storage key)
  * @param {Function} [onProgress] - Progress callback (message: string) => void
- * @returns {Promise<string|null>} - Permanent HTTPS URL or null on failure
+ * @returns {Promise<{downloadUrl: string, gsUri: string}|null>} - Public download URL and gs:// URI, or null on failure
  */
 export async function uploadMediaToCloud(file, lectureId, onProgress) {
   if (!file || !lectureId) return null;
@@ -87,8 +87,9 @@ export async function uploadMediaToCloud(file, lectureId, onProgress) {
 
           try {
             const downloadUrl = await getDownloadURL(uploadTask.snapshot.ref);
-            console.log('[Storage] ✅ Media uploaded successfully:', downloadUrl);
-            resolve(downloadUrl);
+            const gsUri = `gs://${storageRef.bucket}/${storageRef.fullPath}`;
+            console.log('[Storage] ✅ Media uploaded successfully:', downloadUrl, gsUri);
+            resolve({ downloadUrl, gsUri });
           } catch {
             console.info('[Storage] Could not retrieve download URL. Using local media playback.');
             resolve(null);
