@@ -6,13 +6,12 @@ import {
   CloudArrowUp,
   CheckCircle,
   ArrowSquareOut,
-  UserCircle,
 } from '@phosphor-icons/react';
 import { exportToDocsViaClipboard, exportToGoogleDriveDirect } from '../utils/exportUtils';
-import { useAuth } from '../services/auth';
+import { useAuth, getStoredDriveToken } from '../services/auth';
 
 export default function GoogleDocsExportModal({ isOpen, onClose, content, title = 'Lecture Notes' }) {
-  const { user, signInWithGoogle } = useAuth();
+  const { user, signInWithGoogle, driveToken } = useAuth();
   const [isExporting, setIsExporting] = useState(false);
   const [successMsg, setSuccessMsg] = useState(null);
   const [errorMsg, setErrorMsg] = useState(null);
@@ -36,11 +35,19 @@ export default function GoogleDocsExportModal({ isOpen, onClose, content, title 
   const handleDriveDirectExport = async () => {
     setIsExporting(true);
     setErrorMsg(null);
+    setSuccessMsg(null);
     try {
-      if (!user) {
-        await signInWithGoogle();
+      let token = driveToken || getStoredDriveToken();
+      if (!user || !token) {
+        const signInResult = await signInWithGoogle();
+        token = signInResult?.token || getStoredDriveToken();
       }
-      await exportToGoogleDriveDirect(content, title);
+
+      if (!token) {
+        throw new Error('Google sign-in did not return a Drive access token. Please try again.');
+      }
+
+      await exportToGoogleDriveDirect(content, title, token);
       setSuccessMsg('Document successfully created on your Google Drive!');
       setTimeout(() => {
         onClose();

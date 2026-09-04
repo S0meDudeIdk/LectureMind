@@ -385,31 +385,21 @@ export function exportMarkdownFile(content, title = 'lecture-notes') {
 import { markdownToGoogleDocsHtml } from './googleDocsConverter';
 
 /**
- * Load Google Identity Services (GIS) library dynamically
+ * Validate that a value looks like a Google OAuth access token.
+ * This does not guarantee the token is active, only that it is present and well-formed.
  */
-function loadGisScript() {
-  return new Promise((resolve, reject) => {
-    if (window.google?.accounts?.oauth2) return resolve(window.google);
-    const existing = document.getElementById('google-gis-script');
-    if (existing) {
-      existing.onload = () => resolve(window.google);
-      return;
-    }
-    const script = document.createElement('script');
-    script.id = 'google-gis-script';
-    script.src = 'https://accounts.google.com/gsi/client';
-    script.async = true;
-    script.defer = true;
-    script.onload = () => resolve(window.google);
-    script.onerror = (err) => reject(new Error('Failed to load Google Identity Services: ' + err));
-    document.head.appendChild(script);
-  });
+function isValidAccessToken(token) {
+  return typeof token === 'string' && token.length > 0 && token.startsWith('ya29.');
 }
 
 /**
  * Helper to upload HTML to Google Drive via multipart REST API
  */
 export async function uploadHtmlToGoogleDrive(htmlContent, title, accessToken) {
+  if (!isValidAccessToken(accessToken)) {
+    throw new Error('A valid Google Drive access token is required for upload.');
+  }
+
   const metadata = {
     name: title || 'LectureMind Notes',
     mimeType: 'application/vnd.google-apps.document',
@@ -449,61 +439,21 @@ export async function uploadHtmlToGoogleDrive(htmlContent, title, accessToken) {
 }
 
 /**
- * Export note to Google Drive as a native Google Doc via Google Drive REST API
+ * Export note to Google Drive as a native Google Doc via Google Drive REST API.
+ * Requires a valid Google Drive access token. The caller is responsible for
+ * ensuring the user is authenticated before invoking this function.
  */
-export async function exportToGoogleDriveDirect(content, title = 'Lecture Notes', explicitTokenOrClientId = null) {
+export async function exportToGoogleDriveDirect(content, title = 'Lecture Notes', accessToken = null) {
   const htmlContent = markdownToGoogleDocsHtml(content, title);
-  
-  // If a valid OAuth access token is already provided or stored in session
-  const storedToken = explicitTokenOrClientId?.startsWith?.('ya29.') 
-    ? explicitTokenOrClientId 
-    : (sessionStorage.getItem('lecturemind_drive_access_token') || localStorage.getItem('lecturemind_drive_access_token'));
 
-  if (storedToken) {
-    try {
-      return await uploadHtmlToGoogleDrive(htmlContent, title, storedToken);
-    } catch (tokenErr) {
-      console.warn('[Google Drive] Cached access token invalid/expired, requesting new token...', tokenErr);
-    }
+  const storedToken = sessionStorage.getItem('lecturemind_drive_access_token') || localStorage.getItem('lecturemind_drive_access_token');
+  const effectiveToken = isValidAccessToken(accessToken) ? accessToken : storedToken;
+
+  if (!isValidAccessToken(effectiveToken)) {
+    throw new Error('You must be signed in with Google to export directly to Google Drive.');
   }
 
-  // Fallback to Google Identity Services GIS token client
-  const effectiveClientId = (!explicitTokenOrClientId?.startsWith?.('ya29.') && explicitTokenOrClientId) 
-    || import.meta.env.VITE_GOOGLE_CLIENT_ID 
-    || localStorage.getItem('lecturemind_google_client_id');
-
-  if (!effectiveClientId) {
-    throw new Error('Google Client ID is required for direct Google Drive export.');
-  }
-
-  const google = await loadGisScript();
-
-  return new Promise((resolve, reject) => {
-    try {
-      const tokenClient = google.accounts.oauth2.initTokenClient({
-        client_id: effectiveClientId,
-        scope: 'https://www.googleapis.com/auth/drive.file',
-        callback: async (tokenResponse) => {
-          if (tokenResponse.error) {
-            return reject(new Error(tokenResponse.error_description || tokenResponse.error));
-          }
-
-          try {
-            const accessToken = tokenResponse.access_token;
-            sessionStorage.setItem('lecturemind_drive_access_token', accessToken);
-            const result = await uploadHtmlToGoogleDrive(htmlContent, title, accessToken);
-            resolve(result);
-          } catch (err) {
-            reject(err);
-          }
-        },
-      });
-
-      tokenClient.requestAccessToken({ prompt: 'consent' });
-    } catch (err) {
-      reject(err);
-    }
-  });
+  return await uploadHtmlToGoogleDrive(htmlContent, title, effectiveToken);
 }
 
 /**

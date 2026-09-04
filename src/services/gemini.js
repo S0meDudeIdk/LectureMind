@@ -277,6 +277,46 @@ const parseGeminiResponse = (rawText) => {
 };
 
 /**
+ * Shared progress UI helper for AI generation.
+ */
+const runGenerationWithProgress = async (fetchPromise, onProgress) => {
+  onProgress?.("Synthesizing lecture insights on AI server...");
+  const startTime = Date.now();
+  const progressTimer = setInterval(() => {
+    const elapsedSec = Math.round((Date.now() - startTime) / 1000);
+    onProgress?.(`Synthesizing lecture insights on AI server... (${elapsedSec}s)`);
+  }, 3000);
+
+  try {
+    const response = await fetchPromise;
+
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => '');
+      throw new Error(`AI lecture synthesis failed (${response.status}): ${errorText || response.statusText}`);
+    }
+
+    const data = await response.json();
+
+    if (!data || typeof data.markdown !== 'string') {
+      throw new Error("AI server returned an invalid response shape.");
+    }
+
+    onProgress?.("Lecture synthesis complete!");
+
+    return {
+      markdown: data.markdown,
+      notes: data.notes || data.markdown,
+      transcript: Array.isArray(data.transcript) ? data.transcript : [],
+    };
+  } catch (err) {
+    console.warn('[Gemini] Server generation error:', err);
+    throw new Error(`AI lecture synthesis failed: ${err?.message || 'Server internal error. Please try again.'}`);
+  } finally {
+    clearInterval(progressTimer);
+  }
+};
+
+/**
  * High-Speed Multimodal Analysis: sends lecture media metadata and prompt to the
  * server-side /api/generate-lecture endpoint, which streams the media from
  * Firebase Storage (gs:// URI) to Vertex AI and returns parsed sections.
@@ -305,15 +345,8 @@ export const generateLectureContent = async (rawFile, onProgress, options = {}) 
   const promptText = buildPromptText(formattedDuration);
 
   // 3. Send to the server-side Vertex AI endpoint.
-  onProgress?.("Synthesizing lecture insights on AI server...");
-  const startTime = Date.now();
-  const progressTimer = setInterval(() => {
-    const elapsedSec = Math.round((Date.now() - startTime) / 1000);
-    onProgress?.(`Synthesizing lecture insights on AI server... (${elapsedSec}s)`);
-  }, 3000);
-
-  try {
-    const response = await fetch('/api/generate-lecture', {
+  return runGenerationWithProgress(
+    fetch('/api/generate-lecture', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -323,32 +356,50 @@ export const generateLectureContent = async (rawFile, onProgress, options = {}) 
         isVideo,
         promptText,
       }),
-    });
+    }),
+    onProgress
+  );
+};
 
-    if (!response.ok) {
-      const errorText = await response.text().catch(() => '');
-      throw new Error(`AI lecture synthesis failed (${response.status}): ${errorText || response.statusText}`);
-    }
-
-    const data = await response.json();
-
-    if (!data || typeof data.markdown !== 'string') {
-      throw new Error("AI server returned an invalid response shape.");
-    }
-
-    onProgress?.("Lecture synthesis complete!");
-
-    return {
-      markdown: data.markdown,
-      notes: data.notes || data.markdown,
-      transcript: Array.isArray(data.transcript) ? data.transcript : [],
-    };
-  } catch (err) {
-    console.warn('[Gemini] Server generation error:', err);
-    throw new Error(`AI lecture synthesis failed: ${err?.message || 'Server internal error. Please try again.'}`);
-  } finally {
-    clearInterval(progressTimer);
+/**
+ * Anonymous-friendly generation: uploads the raw media file to a temporary
+ * server-side GCS bucket, then runs Vertex AI and returns parsed sections.
+ * The server deletes the staged GCS object after generation.
+ *
+ * @param {File} rawFile - Audio/video media file
+ * @param {function} onProgress - Status callback
+ * @returns {Promise<{ markdown: string, notes: string, transcript: Array }>}
+ */
+export const generateLectureContentFromUpload = async (rawFile, onProgress) => {
+  if (!rawFile) {
+    throw new Error('Missing media file for upload-based generation.');
   }
+
+  const isVideo = rawFile?.type?.startsWith('video/') || /\.(mp4|mov|webm|mkv|avi|wmv)$/i.test(rawFile?.name || '');
+  const mediaMimeType = resolveMimeType(rawFile);
+
+  onProgress?.("Inspecting media metadata...");
+
+  const durationSec = await getMediaDuration(rawFile);
+  const formattedDuration = formatDuration(durationSec);
+  const promptText = buildPromptText(formattedDuration);
+
+  const formData = new FormData();
+  formData.append('file', rawFile);
+  formData.append('mimeType', mediaMimeType);
+  formData.append('duration', String(durationSec || 0));
+  formData.append('isVideo', String(isVideo));
+  formData.append('promptText', promptText);
+
+  onProgress?.("Uploading media to temporary AI storage...");
+
+  return runGenerationWithProgress(
+    fetch('/api/generate-lecture-upload', {
+      method: 'POST',
+      body: formData,
+    }),
+    onProgress
+  );
 };
 
 // Legacy alias helpers

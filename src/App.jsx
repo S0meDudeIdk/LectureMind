@@ -10,6 +10,8 @@ import MindmapAudioWidget from './components/MindmapAudioWidget';
 import ErrorBanner from './components/ErrorBanner';
 import GoogleDocsExportModal from './components/GoogleDocsExportModal';
 import { useAudioUpload } from './hooks/useAudioUpload';
+import { useGenerationLimit } from './hooks/useGenerationLimit';
+import { useAuth } from './services/auth.js';
 import { getMediaFromLocalDb } from './services/mediaDb';
 import { updateMindmap } from './services/db';
 import { 
@@ -19,6 +21,9 @@ import {
 } from './utils/exportUtils';
 
 export default function App() {
+  const { user } = useAuth();
+  const { canGenerate, increment } = useGenerationLimit(user);
+
   const [activeLectureId, setActiveLectureId] = useState(null);
   const [customMarkdown, setCustomMarkdown] = useState(null);
   const [customNotes, setCustomNotes] = useState(null);
@@ -42,7 +47,7 @@ export default function App() {
     fileName: uploadedFileName,
     isVideo: uploadedIsVideo,
     reset,
-  } = useAudioUpload();
+  } = useAudioUpload({ user, canGenerate, incrementGeneration: increment });
 
   const activeMarkdown   = customMarkdown !== null ? customMarkdown : (uploadedMarkdown || '');
   const activeNotes      = customNotes !== null ? customNotes : (uploadedNotes || activeMarkdown);
