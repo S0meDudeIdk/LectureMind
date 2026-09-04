@@ -15,6 +15,7 @@ import {
 import { db, isFirebaseConfigured } from './firebase';
 import { deleteMediaFromCloud } from './storage';
 import { deleteMediaFromLocalDb } from './mediaDb';
+import { isAnonymous } from '../utils/authLimits';
 
 const COLLECTION_NAME = 'mindmaps';
 const LOCAL_STORAGE_KEY = 'lecturemind_saved_mindmaps';
@@ -324,7 +325,7 @@ export const extractTitleFromMarkdown = (markdown, fallback = 'Untitled Lecture'
 /**
  * Save a newly generated mindmap with direct or background Firestore sync.
  */
-export const saveMindmap = async (title, markdown, duration = 'Lecture', extraMeta = {}) => {
+export const saveMindmap = async (title, markdown, duration = 'Lecture', extraMeta = {}, user = null) => {
   const docTitle = title || extractTitleFromMarkdown(markdown, 'Untitled Mindmap');
   const localId = 'local-' + Date.now();
   const now = new Date();
@@ -346,8 +347,8 @@ export const saveMindmap = async (title, markdown, duration = 'Lecture', extraMe
   const updatedList = [newDoc, ...localList.filter((item) => item.id !== localId)];
   setLocalMindmaps(updatedList);
 
-  // 2. Sync to Firestore if configured
-  if (isFirebaseConfigured && db && !isFirestoreDisabled) {
+  // 2. Sync to Firestore for authenticated users when configured
+  if (isFirebaseConfigured && db && !isFirestoreDisabled && !isAnonymous(user)) {
     try {
       const colRef = collection(db, COLLECTION_NAME);
       const firestoreData = {
@@ -382,7 +383,7 @@ export const saveMindmap = async (title, markdown, duration = 'Lecture', extraMe
 /**
  * Update an existing mindmap title or content.
  */
-export const updateMindmap = async (id, updates = {}) => {
+export const updateMindmap = async (id, updates = {}, user = null) => {
   if (!id) return;
 
   // 1. Update in LocalStorage immediately
@@ -405,8 +406,8 @@ export const updateMindmap = async (id, updates = {}) => {
   });
   setLocalMindmaps(updatedList);
 
-  // 2. Sync to Firestore if not a sample ID
-  if (isFirebaseConfigured && db && !isFirestoreDisabled && !id.startsWith('sample-') && id !== '1' && id !== '2') {
+  // 2. Sync to Firestore for authenticated users when configured and not a sample ID
+  if (isFirebaseConfigured && db && !isFirestoreDisabled && !isAnonymous(user) && !id.startsWith('sample-') && id !== '1' && id !== '2') {
     try {
       if (id.startsWith('local-')) {
         // If it was created as a local ID due to a previous timeout, create it in Firestore now

@@ -95,7 +95,7 @@ export function useAuth() {
       const { user: loggedInUser, token } = await signInWithGoogle();
       setUser(loggedInUser);
       setDriveToken(token);
-      return loggedInUser;
+      return { user: loggedInUser, token };
     } catch (err) {
       console.error('[Auth] Google Sign-In failed:', err);
       throw err;

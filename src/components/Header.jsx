@@ -1,11 +1,13 @@
 import { 
   Brain, UserCircle, Sun, Moon, TreeStructure, NotePencil, 
   FileText, FilePdf, Image as ImageIcon, 
-  SidebarSimple, Export, FileDoc, SignOut, GoogleLogo, CheckCircle, Copy, Check
+  SidebarSimple, Export, FileDoc, SignOut, GoogleLogo, CheckCircle, Copy, Check,
+  Lightning, X
 } from '@phosphor-icons/react';
 import { useState, useRef, useEffect } from 'react';
 import { useTheme } from '../context/ThemeContext';
 import { useAuth } from '../services/auth';
+import { isAnonymous } from '../utils/authLimits';
 
 /* ── Small icon button used repeatedly ── */
 function IconBtn({ onClick, title, children, style }) {
@@ -36,15 +38,32 @@ export default function Header({
   onExportMindmapJpg, onExportMindmapPdf,
 }) {
   const { theme, toggle } = useTheme();
-  const { user, signInWithGoogle, signOut, isConfigured } = useAuth();
+  const { user, signInWithGoogle, signOut, isConfigured: _isConfigured } = useAuth();
   
   const [exportOpen, setExportOpen] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
   const [authLoading, setAuthLoading] = useState(false);
   const [authError, setAuthError] = useState(null);
+  const [nudgeDismissed, setNudgeDismissed] = useState(() => {
+    try {
+      return localStorage.getItem('lecturemind_auth_nudge_dismissed') === 'true';
+    } catch {
+      return false;
+    }
+  });
 
   const exportRef = useRef(null);
   const accountRef = useRef(null);
+
+  const dismissNudge = (e) => {
+    e.stopPropagation();
+    setNudgeDismissed(true);
+    try {
+      localStorage.setItem('lecturemind_auth_nudge_dismissed', 'true');
+    } catch {
+      // Ignore storage errors
+    }
+  };
 
   // Close export dropdown on outside click
   useEffect(() => {
@@ -114,6 +133,7 @@ export default function Header({
   ];
 
   return (
+    <>
     <header
       className="flex items-center justify-between h-12 px-3 sticky top-0 z-40 shrink-0"
       style={{
@@ -436,5 +456,39 @@ export default function Header({
         </div>
       </div>
     </header>
+
+    {/* ── Anonymous sign-in nudge ── */}
+    {isAnonymous(user) && !nudgeDismissed && (
+      <div
+        className="sticky top-12 z-30 flex items-center justify-between gap-3 px-3 py-1.5 text-xs border-b cursor-pointer transition-colors"
+        style={{
+          backgroundColor: 'rgba(99, 102, 241, 0.08)',
+          borderColor: 'rgba(99, 102, 241, 0.18)',
+          color: 'var(--color-text)',
+        }}
+        onClick={handleSignIn}
+        role="button"
+        tabIndex={0}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') handleSignIn(); }}
+      >
+        <div className="flex items-center gap-2 min-w-0">
+          <Lightning size={14} weight="fill" className="text-indigo-500 shrink-0" />
+          <span className="truncate">
+            <strong>Sign in</strong> for unlimited generations and file uploads up to 500 MB.
+          </span>
+        </div>
+        <button
+          type="button"
+          onClick={dismissNudge}
+          className="shrink-0 p-0.5 rounded transition-colors cursor-pointer hover:bg-black/5 dark:hover:bg-white/10"
+          style={{ color: 'var(--color-text-muted)' }}
+          title="Dismiss"
+          aria-label="Dismiss sign-in nudge"
+        >
+          <X size={12} weight="bold" />
+        </button>
+      </div>
+    )}
+    </>
   );
 }

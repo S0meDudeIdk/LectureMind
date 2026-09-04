@@ -1,10 +1,15 @@
 import { useState } from 'react';
 import { UploadSimple, FileAudio, Waveform, FilmSlate } from '@phosphor-icons/react';
-
-const ACCEPTED_TYPES = ['audio/mpeg', 'audio/wav', 'audio/mp4', 'audio/m4a', 'audio/ogg', 'audio/webm', 'video/mp4'];
+import { useAuth } from '../services/auth.js';
+import { getMaxFileSizeBytes, formatFileSize } from '../utils/authLimits.js';
 
 export default function DropZone({ onFileSelect }) {
+  const { user } = useAuth();
   const [isDragging, setIsDragging] = useState(false);
+  const [error, setError] = useState(null);
+
+  const maxBytes = getMaxFileSizeBytes(user);
+  const maxLabel = formatFileSize(maxBytes);
 
   const handleDragOver = (e) => { e.preventDefault(); setIsDragging(true); };
   const handleDragLeave = (e) => { e.preventDefault(); setIsDragging(false); };
@@ -12,21 +17,34 @@ export default function DropZone({ onFileSelect }) {
   const handleDrop = (e) => {
     e.preventDefault();
     setIsDragging(false);
+    setError(null);
     if (e.dataTransfer.files?.length > 0) handleFile(e.dataTransfer.files[0]);
   };
 
   const handleFileInput = (e) => {
+    setError(null);
     if (e.target.files?.length > 0) handleFile(e.target.files[0]);
   };
 
   const handleFile = (file) => {
     const isAudio = file.type.startsWith('audio/');
     const isVideo = file.type === 'video/mp4';
-    if (isAudio || isVideo) {
-      onFileSelect(file);
-    } else {
+    if (!isAudio && !isVideo) {
       alert("Please upload an audio or video file (MP3, WAV, M4A, MP4).");
+      return;
     }
+
+    if (file.size > maxBytes) {
+      const currentLimit = formatFileSize(maxBytes);
+      if (!user) {
+        setError(`Please sign in to upload files larger than ${currentLimit}.`);
+      } else {
+        setError(`File exceeds the ${currentLimit} upload limit for your account.`);
+      }
+      return;
+    }
+
+    onFileSelect(file);
   };
 
   return (
@@ -72,7 +90,7 @@ export default function DropZone({ onFileSelect }) {
               <FilmSlate size={13} /> MP4 Video
             </span>
           </div>
-          <p className="text-[11px] text-text-muted/50 mt-2">Max 20MB inline · Larger files via File API</p>
+          <p className="text-[11px] text-text-muted/50 mt-2">Max {maxLabel}</p>
         </div>
         <input 
           type="file" 
@@ -80,6 +98,11 @@ export default function DropZone({ onFileSelect }) {
           accept="audio/*,video/mp4" 
           onChange={handleFileInput}
         />
+        {error && (
+          <p className="absolute bottom-3 text-xs font-medium text-red-500 text-center px-4" role="alert">
+            {error}
+          </p>
+        )}
         <div className="absolute bottom-4 left-4 text-border opacity-50"><Waveform size={24} /></div>
         <div className="absolute top-4 right-4 text-border opacity-50"><FilmSlate size={20} /></div>
       </label>

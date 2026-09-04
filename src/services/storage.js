@@ -1,5 +1,6 @@
 import { ref, uploadBytesResumable, getDownloadURL, deleteObject, listAll } from 'firebase/storage';
 import { storage, isFirebaseConfigured, isStorageConfigured } from './firebase';
+import { isAnonymous } from '../utils/authLimits';
 
 /**
  * Upload a media file (video or audio) to Firebase Cloud Storage
@@ -10,10 +11,16 @@ import { storage, isFirebaseConfigured, isStorageConfigured } from './firebase';
  * @param {File} file - Original video or audio file
  * @param {string} lectureId - Firestore document ID (used as storage key)
  * @param {Function} [onProgress] - Progress callback (message: string) => void
+ * @param {object|null|undefined} [user] - Firebase auth user object
  * @returns {Promise<{downloadUrl: string, gsUri: string}|null>} - Public download URL and gs:// URI, or null on failure
  */
-export async function uploadMediaToCloud(file, lectureId, onProgress) {
+export async function uploadMediaToCloud(file, lectureId, onProgress, user) {
   if (!file || !lectureId) return null;
+
+  // Skip Firebase Storage for explicitly anonymous users (local-only mode)
+  if (user != null && isAnonymous(user)) {
+    return null;
+  }
 
   if (!isFirebaseConfigured || !isStorageConfigured || !storage) {
     console.info('[Storage] Firebase Storage bucket not configured. Using local IndexedDB cache.');
