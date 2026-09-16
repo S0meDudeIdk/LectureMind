@@ -37,7 +37,7 @@ export default function Sidebar({
     return () => unsubscribe();
   }, []);
 
-  const allLectures = firestoreLectures;
+  const allLectures = firestoreLectures.length > 0 ? firestoreLectures : fallbackLectures;
 
   const filteredLectures = allLectures.filter((lec) => {
     if (!searchQuery.trim()) return true;

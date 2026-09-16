@@ -8,6 +8,7 @@ import MarkdownEditor from './components/MarkdownEditor';
 import TranscriptViewer from './components/TranscriptViewer';
 import MindmapAudioWidget from './components/MindmapAudioWidget';
 import ErrorBanner from './components/ErrorBanner';
+import ErrorBoundary from './components/ErrorBoundary';
 import GoogleDocsExportModal from './components/GoogleDocsExportModal';
 import { useAudioUpload } from './hooks/useAudioUpload';
 import { useGenerationLimit } from './hooks/useGenerationLimit';
@@ -231,19 +232,23 @@ export default function App() {
               id="mindmap-tab-pane"
               className={`h-full w-full ${activeTab === 'mindmap' ? 'block relative z-0' : 'absolute inset-0 invisible pointer-events-none -z-10'}`}
             >
-              <MindmapViewer markdown={activeMarkdown} />
+              <ErrorBoundary title="Mindmap failed to display">
+                <MindmapViewer markdown={activeMarkdown} />
+              </ErrorBoundary>
             </div>
 
             {/* Note Editor Tab View - Kept mounted to preserve scroll & cursor */}
             <div
               className={`h-full w-full overflow-y-auto p-5 ${activeTab === 'editor' ? 'block relative z-0' : 'absolute inset-0 invisible pointer-events-none -z-10'}`}
             >
-              <MarkdownEditor
-                markdown={activeMarkdown}
-                notes={activeNotes}
-                onContentChange={(_html, rawMd) => setCustomNotes(rawMd)}
-                onSave={handleNotesSave}
-              />
+              <ErrorBoundary title="Notes editor encountered an error">
+                <MarkdownEditor
+                  markdown={activeMarkdown}
+                  notes={activeNotes}
+                  onContentChange={(_html, rawMd) => setCustomNotes(rawMd)}
+                  onSave={handleNotesSave}
+                />
+              </ErrorBoundary>
             </div>
 
             {/* Transcript Tab View */}

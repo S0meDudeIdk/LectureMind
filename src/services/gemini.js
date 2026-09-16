@@ -293,10 +293,26 @@ const runGenerationWithProgress = async (fetchPromise, onProgress) => {
 
   try {
     const response = await fetchPromise;
+    const contentType = response.headers.get('content-type') || '';
 
     if (!response.ok) {
-      const errorText = await response.text().catch(() => '');
-      throw new Error(`AI lecture synthesis failed (${response.status}): ${errorText || response.statusText}`);
+      let errorMsg = response.statusText;
+      if (contentType.includes('application/json')) {
+        const errorJson = await response.json().catch(() => null);
+        if (errorJson?.error) {
+          errorMsg = errorJson.error;
+        }
+      } else {
+        const errorText = await response.text().catch(() => '');
+        errorMsg = errorText.slice(0, 150) || response.statusText;
+      }
+      throw new Error(`AI lecture synthesis failed (${response.status}): ${errorMsg}`);
+    }
+
+    if (!contentType.includes('application/json')) {
+      const text = await response.text().catch(() => '');
+      console.error('[Gemini] Non-JSON response received from server:', text.slice(0, 300));
+      throw new Error('AI lecture synthesis failed: Server returned an invalid non-JSON response. Please verify server connectivity and retry.');
     }
 
     const data = await response.json();
@@ -314,6 +330,9 @@ const runGenerationWithProgress = async (fetchPromise, onProgress) => {
     };
   } catch (err) {
     console.warn('[Gemini] Server generation error:', err);
+    if (err?.message?.startsWith('AI lecture synthesis failed')) {
+      throw err;
+    }
     throw new Error(`AI lecture synthesis failed: ${err?.message || 'Server internal error. Please try again.'}`);
   } finally {
     clearInterval(progressTimer);

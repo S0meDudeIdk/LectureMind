@@ -1,3 +1,5 @@
+import { markdownToGoogleDocsHtml } from './googleDocsConverter';
+
 function sanitizeFilename(title) {
   return String(title).toLowerCase().replace(/[^a-z0-9_-]/g, '_') || 'mindmap';
 }
@@ -50,8 +52,6 @@ export function exportMarkdownFile(content, title = 'lecture-notes') {
   a.click();
   URL.revokeObjectURL(url);
 }
-
-import { markdownToGoogleDocsHtml } from './googleDocsConverter';
 
 /**
  * Validate that a value looks like a Google OAuth access token.

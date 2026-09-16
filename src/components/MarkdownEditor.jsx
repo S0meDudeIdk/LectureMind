@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo, useRef } from 'react';
+import { useEffect, useState, useMemo, useRef, useCallback } from 'react';
 import { marked } from 'marked';
 import katex from 'katex';
 import CodeMirror from '@uiw/react-codemirror';
@@ -24,7 +24,6 @@ import {
   ListBullets, 
   ListNumbers, 
   Quotes, 
-  Code, 
   CodeBlock,
   CheckSquare,
   Highlighter,
@@ -248,9 +247,11 @@ export default function MarkdownEditor({
   const isLight = theme === 'light';
 
   // Sync when external lecture selection changes
+  const lastSyncedContentRef = useRef(initialContent);
   useEffect(() => {
     const nextContent = notes !== null && notes !== undefined ? notes : markdown;
-    if (nextContent !== null && nextContent !== undefined && nextContent !== rawMarkdown) {
+    if (nextContent !== null && nextContent !== undefined && nextContent !== lastSyncedContentRef.current) {
+      lastSyncedContentRef.current = nextContent;
       setRawMarkdown(nextContent);
       setSaveStatus('saved');
     }
@@ -263,19 +264,14 @@ export default function MarkdownEditor({
     };
   }, []);
 
-  // Rendered HTML for Docs / Export
-  const renderedHtml = useMemo(() => {
-    return renderMarkdownWithLatex(rawMarkdown);
-  }, [rawMarkdown]);
-
   // Trigger Save function
-  const triggerSave = (contentToSave) => {
+  const triggerSave = useCallback((contentToSave) => {
     setSaveStatus('saving');
     onSave?.(contentToSave);
     setTimeout(() => {
       setSaveStatus('saved');
     }, 350);
-  };
+  }, [onSave]);
 
   // CodeMirror update handler with auto-save debounce
   const handleCodeMirrorChange = (val) => {
@@ -316,7 +312,7 @@ export default function MarkdownEditor({
             .replace(/==([^=]+)==/g, '$1')
             .replace(/`([^`]+)`/g, '$1')
             .replace(/^#{1,6}\s+/gm, '')
-            .replace(/^\s*[-*+]\s+\[[ xX\-\/]\]\s+/gm, '')
+            .replace(/^\s*[-*+]\s+\[[ xX\-/]\]\s+/gm, '')
             .replace(/^\s*[-*+]\s+/gm, '')
             .replace(/^\s*\d+\.\s+/gm, '')
             .replace(/^\s*>\s*\[!.*?\]\s*.*$/gm, '')
@@ -333,7 +329,7 @@ export default function MarkdownEditor({
             .replace(/==([^=]+)==/g, '$1')
             .replace(/`([^`]+)`/g, '$1')
             .replace(/^#{1,6}\s+/, '')
-            .replace(/^\s*[-*+]\s+\[[ xX\-\/]\]\s+/, '')
+            .replace(/^\s*[-*+]\s+\[[ xX\-/]\]\s+/, '')
             .replace(/^\s*[-*+]\s+/, '')
             .replace(/^\s*\d+\.\s+/, '')
             .replace(/^\s*>\s*\[!.*?\]\s*.*$/, '')
@@ -438,7 +434,7 @@ export default function MarkdownEditor({
         const sel = tr.newSelection.main;
         if (sel.empty) {
           const line = tr.newDoc.lineAt(sel.head);
-          const taskMatch = line.text.match(/^(\s*[-*+]\s+\[[ xX\-\/]\]\s*)/);
+          const taskMatch = line.text.match(/^(\s*[-*+]\s+\[[ xX\-/]\]\s*)/);
           if (taskMatch) {
             const prefixEnd = line.from + taskMatch[0].length;
             if (sel.head === prefixEnd && sel.assoc <= 0) {
@@ -463,8 +459,8 @@ export default function MarkdownEditor({
             const text = line.text;
             const col = from - line.from;
 
-            // Check if current line is a task list item: ^(\s*[-*+]\s+)\[[ xX\-\/]\]\s*(.*)$
-            const taskMatch = text.match(/^(\s*[-*+]\s+)\[([ xX\-\/])\](\s*)(.*)$/);
+            // Check if current line is a task list item: ^(\s*[-*+]\s+)\[[ xX\-/]\]\s*(.*)$
+            const taskMatch = text.match(/^(\s*[-*+]\s+)\[([ xX\-/])\](\s*)(.*)$/);
             if (taskMatch) {
               const indentAndBullet = taskMatch[1]; // e.g. "- " or "    - "
               const content = taskMatch[4]; // text after "- [ ] "
@@ -510,7 +506,7 @@ export default function MarkdownEditor({
       ])),
       EditorView.lineWrapping,
     ];
-  }, [isLight, onSave]);
+  }, [isLight, triggerSave]);
 
   return (
     <div className="flex flex-col h-full bg-surface border border-black/10 dark:border-white/10 rounded-xl overflow-hidden shadow-sm">

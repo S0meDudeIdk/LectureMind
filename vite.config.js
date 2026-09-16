@@ -506,18 +506,45 @@ function geminiApiPlugin() {
   };
 
   const mountApi = (middlewares) => {
-    middlewares.use('/api/generate-lecture', async (req, res, next) => {
-      if (req.method !== 'POST') {
-        return next();
-      }
-      return generateLecture(req, res);
-    });
+    middlewares.use('/api', async (req, res) => {
+      const urlPath = (req.url || '').split('?')[0];
 
-    middlewares.use('/api/generate-lecture-upload', async (req, res, next) => {
-      if (req.method !== 'POST') {
-        return next();
+      if (req.method === 'OPTIONS') {
+        res.statusCode = 204;
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+        res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+        return res.end();
       }
-      return generateLectureFromUpload(req, res);
+
+      if (urlPath === '/generate-lecture' || urlPath === '/generate-lecture/') {
+        if (req.method !== 'POST') {
+          res.statusCode = 405;
+          res.setHeader('Content-Type', 'application/json');
+          return res.end(JSON.stringify({ error: 'Method Not Allowed. Use POST.' }));
+        }
+        return generateLecture(req, res);
+      }
+
+      if (urlPath === '/generate-lecture-upload' || urlPath === '/generate-lecture-upload/') {
+        if (req.method !== 'POST') {
+          res.statusCode = 405;
+          res.setHeader('Content-Type', 'application/json');
+          return res.end(JSON.stringify({ error: 'Method Not Allowed. Use POST.' }));
+        }
+        return generateLectureFromUpload(req, res);
+      }
+
+      if (urlPath === '/health' || urlPath === '/health/') {
+        res.statusCode = 200;
+        res.setHeader('Content-Type', 'application/json');
+        return res.end(JSON.stringify({ status: 'ok' }));
+      }
+
+      // Any other /api/* path must return JSON 404, never falling through to index.html
+      res.statusCode = 404;
+      res.setHeader('Content-Type', 'application/json');
+      return res.end(JSON.stringify({ error: `API route not found: /api${urlPath}` }));
     });
   };
 
