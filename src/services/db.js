@@ -9,8 +9,7 @@ import {
   query,
   orderBy,
   limit,
-  serverTimestamp,
-  disableNetwork
+  serverTimestamp
 } from 'firebase/firestore';
 import { db, isFirebaseConfigured } from './firebase';
 import { deleteMediaFromCloud } from './storage';
@@ -245,14 +244,21 @@ const timeoutPromise = (promise, ms = 2000) => {
   ]);
 };
 
-// Helper: Safely disable Firestore background network retries on adblocker detection
+// Helper: Safely fall back to LocalStorage on adblocker or persistent Firestore errors
 const handleFirestoreError = (err) => {
-  if (!isFirestoreDisabled && db) {
+  const errMsg = (err?.message || '').toLowerCase();
+  const isPermanent =
+    errMsg.includes('blocked by client') ||
+    errMsg.includes('failed to fetch') ||
+    errMsg.includes('network error') ||
+    err?.code === 'unavailable' ||
+    err?.code === 'permission-denied';
+
+  if (isPermanent && !isFirestoreDisabled) {
     isFirestoreDisabled = true;
-    try {
-      disableNetwork(db);
-    } catch {}
-    console.info('[LectureMind] Ad blocker or offline network detected. Using LocalStorage persistence seamlessly.');
+    console.info('[LectureMind] Firestore network restricted (ad blocker or offline). Using LocalStorage seamlessly.');
+  } else {
+    console.warn('[LectureMind] Firestore operation skipped/failed:', err?.message || err);
   }
 };
 

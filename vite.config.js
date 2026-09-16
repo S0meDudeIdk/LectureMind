@@ -227,6 +227,39 @@ function createTimeoutController(timeoutMs) {
   return { controller, clear: () => clearTimeout(timer) };
 }
 
+/**
+ * Normalize and validate media MIME types for Vertex AI multimodal input.
+ * Converts 'audio/mp3' to 'audio/mpeg' and maps unknown octet streams or file URIs
+ * to valid audio/video MIME types accepted by Vertex AI.
+ * @param {string} mimeType
+ * @param {string} fileUri
+ * @returns {string}
+ */
+function normalizeMimeType(mimeType, fileUri = '') {
+  let type = (mimeType || '').trim().toLowerCase().split(';')[0];
+
+  // Vertex AI strictly requires audio/mpeg for MP3 files
+  if (type === 'audio/mp3') return 'audio/mpeg';
+
+  // If MIME type is missing or generic octet-stream, infer from file extension or URI
+  if (!type || type === 'application/octet-stream') {
+    const target = fileUri.toLowerCase();
+    if (target.endsWith('.mp3')) return 'audio/mpeg';
+    if (target.endsWith('.wav')) return 'audio/wav';
+    if (target.endsWith('.m4a')) return 'audio/m4a';
+    if (target.endsWith('.aac')) return 'audio/aac';
+    if (target.endsWith('.ogg')) return 'audio/ogg';
+    if (target.endsWith('.flac')) return 'audio/flac';
+    if (target.endsWith('.mp4')) return 'video/mp4';
+    if (target.endsWith('.mov')) return 'video/quicktime';
+    if (target.endsWith('.webm')) return 'video/webm';
+    // Default fallback to audio/mpeg if unspecified
+    return 'audio/mpeg';
+  }
+
+  return type;
+}
+
 function geminiApiPlugin() {
   let vertexClient = null;
   let storageClient = null;
@@ -249,11 +282,14 @@ function geminiApiPlugin() {
    * @param {import('http').ServerResponse} res - Response object
    */
   const runVertexGeneration = async (fileUri, mimeType, promptText, res) => {
+    const validMimeType = normalizeMimeType(mimeType, fileUri);
+    console.log(`[Vertex AI] Normalized MIME type: "${mimeType}" -> "${validMimeType}" for file ${fileUri}`);
+
     const contents = [
       {
         fileData: {
           fileUri,
-          mimeType: mimeType || 'application/octet-stream',
+          mimeType: validMimeType,
         },
       },
       promptText,

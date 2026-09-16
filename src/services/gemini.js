@@ -17,7 +17,7 @@ export const resolveMimeType = (file) => {
   const ext = (file?.name || '').split('.').pop()?.toLowerCase() || '';
 
   const extMap = {
-    mp3: 'audio/mp3',
+    mp3: 'audio/mpeg',
     wav: 'audio/wav',
     wave: 'audio/wav',
     m4a: 'audio/m4a',
@@ -39,7 +39,7 @@ export const resolveMimeType = (file) => {
   };
 
   if (extMap[ext]) {
-    if (ext === 'mp3') return rawType === 'audio/mpeg' ? 'audio/mpeg' : 'audio/mp3';
+    if (ext === 'mp3') return 'audio/mpeg';
     if (ext === 'wav' || ext === 'wave') return 'audio/wav';
     if (ext === 'm4a') return 'audio/m4a';
     if (ext === 'mp4') return rawType.startsWith('audio') ? 'audio/mp4' : 'video/mp4';
@@ -47,7 +47,7 @@ export const resolveMimeType = (file) => {
   }
 
   if (rawType) {
-    if (rawType.includes('mpeg') || rawType.includes('mp3')) return 'audio/mp3';
+    if (rawType.includes('mpeg') || rawType.includes('mp3')) return 'audio/mpeg';
     if (rawType.includes('wav')) return 'audio/wav';
     if (rawType.includes('m4a') || rawType.includes('x-m4a')) return 'audio/m4a';
     if (rawType.includes('aac')) return 'audio/aac';

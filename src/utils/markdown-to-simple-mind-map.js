@@ -69,6 +69,7 @@ function cleanRichText(html) {
 }
 
 function isDark() {
+  if (typeof document === 'undefined') return false;
   return !document.documentElement.classList.contains('light');
 }
 
@@ -92,14 +93,27 @@ function deriveColor(baseHex, depth) {
   return { bg, border, text };
 }
 
+function getNodeWeight(node) {
+  if (!node) return 0;
+  let count = 1;
+  if (Array.isArray(node.children)) {
+    for (const child of node.children) {
+      count += getNodeWeight(child);
+    }
+  }
+  return count;
+}
+
 function buildSimpleNode(node, baseHex, depth) {
   const { bg, border, text } = deriveColor(baseHex, depth);
   const children = (node.children || []).map((child) =>
     buildSimpleNode(child, baseHex, depth + 1)
   );
 
+  const rawText = cleanRichText(node.content) || htmlToText(node.content);
+
   const data = {
-    text: cleanRichText(node.content) || htmlToText(node.content),
+    text: rawText,
     richText: true,
     fillColor: bg,
     color: text,
@@ -115,18 +129,97 @@ function buildSimpleNode(node, baseHex, depth) {
   return { data, children };
 }
 
-function buildRootNode(node) {
+function buildRootNode(initialNode) {
   const dark = isDark();
-  const children = (node.children || []).map((child, index) => {
-    const direction = index % 2 === 0 ? 'left' : 'right';
+
+  let current = initialNode;
+  const titleParts = [];
+  if (current?.content) {
+    titleParts.push(current.content);
+  }
+
+  // Unwrap single-child intermediate headers (e.g. # Document Title -> ## Single Topic -> ### Branches...)
+  // so the main branches expand outward on both sides from the center root
+  while (
+    current?.children &&
+    current.children.length === 1 &&
+    current.children[0].children &&
+    current.children[0].children.length > 0
+  ) {
+    const onlyChild = current.children[0];
+    if (onlyChild.content) {
+      titleParts.push(onlyChild.content);
+    }
+    current = {
+      ...current,
+      content: current.content,
+      children: onlyChild.children,
+    };
+  }
+
+  const rawChildren = current?.children || [];
+  const totalChildren = rawChildren.length;
+
+  // Calculate balanced left & right directions so the mindmap expands symmetrically on both sides
+  const directions = [];
+  let rightWeight = 0;
+  let leftWeight = 0;
+  const rightLimit = Math.ceil(totalChildren / 2);
+
+  rawChildren.forEach((child, index) => {
+    const w = getNodeWeight(child);
+    let dir = 'right';
+    if (totalChildren <= 1) {
+      dir = 'right';
+    } else if (index === 0) {
+      dir = 'right';
+      rightWeight += w;
+    } else if (index === 1 && totalChildren === 2) {
+      dir = 'left';
+      leftWeight += w;
+    } else {
+      const rightBranches = directions.filter((d) => d === 'right').length;
+      const leftBranches = directions.filter((d) => d === 'left').length;
+
+      if (rightBranches >= rightLimit) {
+        dir = 'left';
+      } else if (leftBranches >= rightLimit) {
+        dir = 'right';
+      } else if (rightWeight <= leftWeight) {
+        dir = 'right';
+      } else {
+        dir = 'left';
+      }
+
+      if (dir === 'right') rightWeight += w;
+      else leftWeight += w;
+    }
+    directions.push(dir);
+  });
+
+  const children = rawChildren.map((child, index) => {
+    const direction = directions[index] || (index % 2 === 0 ? 'right' : 'left');
     const color = BRANCH_PALETTE[index % BRANCH_PALETTE.length];
     const branch = buildSimpleNode(child, color, 1);
     branch.data.dir = direction;
     return branch;
   });
 
+  const cleanTitles = titleParts
+    .map((t) => cleanRichText(t) || htmlToText(t))
+    .filter(Boolean);
+
+  let rootDisplayText = 'Lecture Notes';
+  if (cleanTitles.length === 1) {
+    rootDisplayText = cleanTitles[0];
+  } else if (cleanTitles.length > 1) {
+    const mainTitle = cleanTitles[0];
+    const subTitle = cleanTitles.slice(1).join(' • ');
+    rootDisplayText = `<div style="font-weight:700;font-size:1.06em;line-height:1.3;">${mainTitle}</div><div style="font-weight:500;font-size:0.84em;opacity:0.85;margin-top:3px;line-height:1.25;">${subTitle}</div>`;
+  }
+
   const rootData = {
-    text: cleanRichText(node.content) || htmlToText(node.content) || 'Lecture Notes',
+    text: rootDisplayText,
     richText: true,
     fillColor: dark ? 'rgba(130, 130, 190, 0.9)' : 'rgba(200, 195, 255, 0.9)',
     color: dark ? '#ffffff' : '#1e1b4b',

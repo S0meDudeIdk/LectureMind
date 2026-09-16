@@ -117,41 +117,54 @@ export function useAudioUpload({ user, canGenerate, incrementGeneration } = {}) 
         incrementGeneration?.();
       } else {
         // 3b. Logged-in path: upload media to Firebase Storage and obtain the gs:// URI
-        // required by the server-side Vertex AI endpoint.
-        const cloudUploadPromise = saved?.id && processingFile
-          ? uploadMediaToCloud(processingFile, saved.id, (msg) => {
-              setCloudUploadProgress(msg);
-            }, user)
-          : Promise.resolve(null);
+        // required by the server-side Vertex AI endpoint. If Firebase Storage fails or is blocked,
+        // fall back seamlessly to generateLectureContentFromUpload.
+        let cloudUploadResult = null;
+        try {
+          const cloudUploadPromise = saved?.id && processingFile
+            ? uploadMediaToCloud(processingFile, saved.id, (msg) => {
+                setCloudUploadProgress(msg);
+              }, user)
+            : Promise.resolve(null);
 
-        const cloudUploadResult = await cloudUploadPromise;
-        setCloudUploadProgress(null);
-
-        if (!cloudUploadResult?.gsUri) {
-          throw new Error(
-            'Cloud storage upload is required for AI generation, but it did not complete. ' +
-            'Please check your Firebase Storage configuration and try again.'
-          );
+          cloudUploadResult = await cloudUploadPromise;
+        } catch (storageErr) {
+          console.warn('[useAudioUpload] Cloud upload attempt failed, falling back to server upload:', storageErr);
+        } finally {
+          setCloudUploadProgress(null);
         }
 
-        const { downloadUrl, gsUri } = cloudUploadResult;
+        if (cloudUploadResult?.gsUri) {
+          const { downloadUrl, gsUri } = cloudUploadResult;
 
-        setAudioUrl(downloadUrl);
-        if (saved?.id) {
-          updateMindmap(saved.id, { audioUrl: downloadUrl }, user).catch((e) =>
-            console.warn('[Storage] Firestore cloud URL update failed:', e)
-          );
+          setAudioUrl(downloadUrl);
+          if (saved?.id) {
+            updateMindmap(saved.id, { audioUrl: downloadUrl }, user).catch((e) =>
+              console.warn('[Storage] Firestore cloud URL update failed:', e)
+            );
+          }
+
+          const aiAnalysisPromise = generateLectureContent(processingFile, (msg) => setProgressMsg(msg), {
+            gsUri,
+            originalIsVideo: fileIsVideo,
+          });
+
+          const result = await aiAnalysisPromise;
+          cleanMarkdown = result.markdown;
+          cleanNotes = result.notes || result.markdown;
+          transcriptChunks = result.transcript || [];
+        } else {
+          // Fallback: upload directly to server temporary staging
+          setProgressMsg('Using direct AI upload channel...');
+          const aiAnalysisPromise = generateLectureContentFromUpload(processingFile, (msg) => setProgressMsg(msg), {
+            originalIsVideo: fileIsVideo,
+          });
+
+          const result = await aiAnalysisPromise;
+          cleanMarkdown = result.markdown;
+          cleanNotes = result.notes || result.markdown;
+          transcriptChunks = result.transcript || [];
         }
-
-        const aiAnalysisPromise = generateLectureContent(processingFile, (msg) => setProgressMsg(msg), {
-          gsUri,
-          originalIsVideo: fileIsVideo,
-        });
-
-        const result = await aiAnalysisPromise;
-        cleanMarkdown = result.markdown;
-        cleanNotes = result.notes || result.markdown;
-        transcriptChunks = result.transcript || [];
       }
 
       setMarkdown(cleanMarkdown);
