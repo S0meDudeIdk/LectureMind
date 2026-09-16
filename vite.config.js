@@ -19,6 +19,11 @@ const VERTEX_FALLBACK_MODELS = [
   'gemini-3.5-flash-lite',
 ];
 
+// Per-request ceiling for Vertex AI generation calls. The default Node/Vite
+// server timeout is too short for large media files, so each attempt gets its
+// own AbortController-based deadline.
+const VERTEX_REQUEST_TIMEOUT_MS = 600000; // 10 minutes
+
 /**
  * Resilient extractor for verbatim transcript chunks.
  * Handles valid JSON, truncated arrays, raw markdown codeblocks, and regex recovery.
@@ -203,6 +208,25 @@ function readRequestBody(req) {
   });
 }
 
+/**
+ * Create an AbortController that aborts after a fixed timeout with a
+ * TimeoutError DOMException, making it easy to detect deadline violations.
+ * @param {number} timeoutMs
+ * @returns {{ controller: AbortController, clear: () => void }}
+ */
+function createTimeoutController(timeoutMs) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => {
+    controller.abort(
+      new DOMException(
+        `Vertex AI request timed out after ${timeoutMs} ms`,
+        'TimeoutError'
+      )
+    );
+  }, timeoutMs);
+  return { controller, clear: () => clearTimeout(timer) };
+}
+
 function geminiApiPlugin() {
   let vertexClient = null;
   let storageClient = null;
@@ -218,7 +242,7 @@ function geminiApiPlugin() {
 
   /**
    * Run the Vertex AI generation loop across fallback models and send the JSON response.
-   * On success, sends { markdown, notes, transcript }. On failure, sends 500 JSON.
+   * On success, sends { markdown, notes, transcript }. On failure, sends 500/504 JSON.
    * @param {string} fileUri - gs:// URI for the media file
    * @param {string} mimeType - Media MIME type
    * @param {string} promptText - Prompt text
@@ -245,12 +269,16 @@ function geminiApiPlugin() {
     try {
       for (const modelName of VERTEX_FALLBACK_MODELS) {
         for (let attempt = 1; attempt <= 2; attempt++) {
+          const { controller, clear } = createTimeoutController(VERTEX_REQUEST_TIMEOUT_MS);
           try {
             console.log(`[Vertex AI] Generating lecture with model ${modelName} (attempt ${attempt})...`);
             const response = await vertexClient.models.generateContent({
               model: modelName,
               contents,
-              config,
+              config: {
+                ...config,
+                abortSignal: controller.signal,
+              },
             });
 
             const rawText = response?.text?.trim?.() || '';
@@ -259,11 +287,13 @@ function geminiApiPlugin() {
             }
 
             const parsed = parseLectureResponse(rawText);
+            clear();
             res.statusCode = 200;
             res.setHeader('Content-Type', 'application/json');
             res.end(JSON.stringify(parsed));
             return;
           } catch (err) {
+            clear();
             lastError = err;
             console.warn(`[Vertex AI] Model ${modelName} attempt ${attempt} error:`, err?.message || err);
 
@@ -294,9 +324,15 @@ function geminiApiPlugin() {
       throw new Error(`Vertex AI lecture generation failed across all models: ${lastError?.message || 'Unknown error'}`);
     } catch (err) {
       console.error('[Vertex AI] Generation error:', err);
-      res.statusCode = 500;
+      const isTimeout =
+        err?.name === 'TimeoutError' ||
+        err?.message?.toLowerCase().includes('timed out');
+      res.statusCode = isTimeout ? 504 : 500;
       res.setHeader('Content-Type', 'application/json');
-      res.end(JSON.stringify({ error: err.message || 'Server error during lecture generation' }));
+      res.end(JSON.stringify({
+        error: err.message || 'Server error during lecture generation',
+        ...(isTimeout && { code: 'VERTEX_AI_TIMEOUT' }),
+      }));
     }
   };
 
@@ -514,6 +550,12 @@ function geminiApiPlugin() {
 
 export default defineConfig({
   plugins: [react(), tailwindcss(), geminiApiPlugin()],
+  // ffmpeg.wasm (multi-thread core) requires SharedArrayBuffer, which needs
+  // cross-origin isolation headers. Exclude the packages from pre-bundling
+  // so Vite does not try to optimize the ESM worker entry points.
+  optimizeDeps: {
+    exclude: ['@ffmpeg/ffmpeg', '@ffmpeg/util'],
+  },
   server: {
     port: 3000,
     host: '0.0.0.0',

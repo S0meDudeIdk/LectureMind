@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import Header from './Header';
-import { SidebarSimple } from '@phosphor-icons/react';
+import { SidebarProvider } from '../context/SidebarContext';
 
 export default function Layout({ 
   sidebar, children, activeTab, setActiveTab, hasContent, 
@@ -25,25 +25,34 @@ export default function Layout({
         onExportMindmapPdf={onExportMindmapPdf}
       />
 
-      <div className="flex flex-1 overflow-hidden">
-        {/* Sidebar — slides in/out with CSS transition */}
-        <div
-          className="flex-shrink-0 overflow-hidden transition-all duration-250 ease-in-out"
+      <div className="flex flex-1 overflow-hidden relative">
+        {/* Sidebar — floats over the canvas so the mindmap canvas never resizes */}
+        <aside
+          className="absolute left-0 top-0 bottom-0 z-20 transition-transform duration-250 ease-in-out"
           style={{
-            width: sidebarOpen ? '240px' : '0px',
-            opacity: sidebarOpen ? 1 : 0,
+            width: '240px',
+            transform: sidebarOpen ? 'translateX(0)' : 'translateX(-100%)',
             pointerEvents: sidebarOpen ? 'auto' : 'none',
           }}
         >
-          {/* Inner wrapper keeps the sidebar's own width stable so it doesn't reflow */}
-          <div className="w-60 h-full">
+          <div
+            className="w-60 h-full"
+            style={{
+              backgroundColor: 'var(--color-surface)',
+              borderRight: '1px solid var(--color-border)',
+            }}
+          >
             {sidebar}
           </div>
-        </div>
+        </aside>
 
-        {/* Canvas — dot grid */}
-        <main className="flex-1 overflow-hidden canvas-bg relative">
-          {children}
+        {/* Canvas — dot grid, always full width */}
+        <main
+          className={`flex-1 overflow-hidden canvas-bg relative w-full h-full ${
+            sidebarOpen ? 'sidebar-open' : ''
+          }`}
+        >
+          <SidebarProvider value={{ sidebarOpen }}>{children}</SidebarProvider>
         </main>
       </div>
     </div>

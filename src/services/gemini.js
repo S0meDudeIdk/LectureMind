@@ -42,7 +42,7 @@ export const resolveMimeType = (file) => {
     if (ext === 'mp3') return rawType === 'audio/mpeg' ? 'audio/mpeg' : 'audio/mp3';
     if (ext === 'wav' || ext === 'wave') return 'audio/wav';
     if (ext === 'm4a') return 'audio/m4a';
-    if (ext === 'mp4') return 'video/mp4';
+    if (ext === 'mp4') return rawType.startsWith('audio') ? 'audio/mp4' : 'video/mp4';
     return extMap[ext];
   }
 
@@ -104,6 +104,10 @@ Output the three sections using the exact delimiters in this exact order:
  * @param {string} text - Raw transcript text
  * @returns {Array<{startTime: string, textBlock: string}>}
  */
+function stripLeadingTimestamp(text) {
+  return String(text || '').replace(/^\d{1,2}:\d{2}(?::\d{2})?\s*[-:\s]*/, '');
+}
+
 const extractTranscriptChunks = (text) => {
   if (!text || typeof text !== 'string') return [];
 
@@ -123,7 +127,7 @@ const extractTranscriptChunks = (text) => {
         .filter((item) => item && (item.textBlock || item.text))
         .map((item) => ({
           startTime: String(item.startTime || item.timestamp || item.time || '00:00').trim(),
-          textBlock: String(item.textBlock || item.text || '').trim(),
+          textBlock: stripLeadingTimestamp(String(item.textBlock || item.text || '').trim()),
         }));
     }
   } catch {
@@ -140,7 +144,7 @@ const extractTranscriptChunks = (text) => {
           .filter((item) => item && (item.textBlock || item.text))
           .map((item) => ({
             startTime: String(item.startTime || item.timestamp || item.time || '00:00').trim(),
-            textBlock: String(item.textBlock || item.text || '').trim(),
+            textBlock: stripLeadingTimestamp(String(item.textBlock || item.text || '').trim()),
           }));
       }
     } catch {
@@ -155,7 +159,7 @@ const extractTranscriptChunks = (text) => {
   while ((match = objRegex.exec(cleaned)) !== null) {
     try {
       const startTime = match[1].trim();
-      const textBlock = match[2].replace(/\\"/g, '"').replace(/\\n/g, ' ').trim();
+      const textBlock = stripLeadingTimestamp(match[2].replace(/\\"/g, '"').replace(/\\n/g, ' ').trim());
       if (startTime && textBlock) {
         chunks.push({ startTime, textBlock });
       }
@@ -171,7 +175,7 @@ const extractTranscriptChunks = (text) => {
   let lineMatch;
   while ((lineMatch = lineRegex.exec(cleaned)) !== null) {
     const startTime = lineMatch[1].trim();
-    const textBlock = lineMatch[2].trim();
+    const textBlock = stripLeadingTimestamp(lineMatch[2].trim());
     if (startTime && textBlock && textBlock.length > 2) {
       chunks.push({ startTime, textBlock });
     }
@@ -323,7 +327,7 @@ const runGenerationWithProgress = async (fetchPromise, onProgress) => {
  *
  * @param {File} rawFile - Audio/video media file (metadata source)
  * @param {function} onProgress - Status callback
- * @param {object} [options] - Must include { gsUri } from Firebase Storage
+ * @param {object} [options] - Must include { gsUri } from Firebase Storage; may include { originalIsVideo } to preserve the original media type when audio is extracted from a video
  * @returns {Promise<{ markdown: string, notes: string, transcript: Array }>}
  */
 export const generateLectureContent = async (rawFile, onProgress, options = {}) => {
@@ -332,7 +336,10 @@ export const generateLectureContent = async (rawFile, onProgress, options = {}) 
     throw new Error("Missing gsUri: media must be uploaded to Firebase Storage before AI generation.");
   }
 
-  const isVideo = rawFile?.type?.startsWith('video/') || /\.(mp4|mov|webm|mkv|avi|wmv)$/i.test(rawFile?.name || '');
+  const originalIsVideo = options?.originalIsVideo;
+  const isVideo = typeof originalIsVideo === 'boolean'
+    ? originalIsVideo
+    : rawFile?.type?.startsWith('video/') || /\.(mp4|mov|webm|mkv|avi|wmv)$/i.test(rawFile?.name || '');
   const mediaMimeType = resolveMimeType(rawFile);
 
   onProgress?.("Inspecting media metadata...");
@@ -368,14 +375,18 @@ export const generateLectureContent = async (rawFile, onProgress, options = {}) 
  *
  * @param {File} rawFile - Audio/video media file
  * @param {function} onProgress - Status callback
+ * @param {object} [options] - Optional { originalIsVideo } to preserve the original media type when audio is extracted from a video
  * @returns {Promise<{ markdown: string, notes: string, transcript: Array }>}
  */
-export const generateLectureContentFromUpload = async (rawFile, onProgress) => {
+export const generateLectureContentFromUpload = async (rawFile, onProgress, options = {}) => {
   if (!rawFile) {
     throw new Error('Missing media file for upload-based generation.');
   }
 
-  const isVideo = rawFile?.type?.startsWith('video/') || /\.(mp4|mov|webm|mkv|avi|wmv)$/i.test(rawFile?.name || '');
+  const originalIsVideo = options?.originalIsVideo;
+  const isVideo = typeof originalIsVideo === 'boolean'
+    ? originalIsVideo
+    : rawFile?.type?.startsWith('video/') || /\.(mp4|mov|webm|mkv|avi|wmv)$/i.test(rawFile?.name || '');
   const mediaMimeType = resolveMimeType(rawFile);
 
   onProgress?.("Inspecting media metadata...");

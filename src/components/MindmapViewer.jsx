@@ -1,107 +1,70 @@
-import { useEffect, useRef, useCallback, useState } from 'react';
-import { Transformer } from 'markmap-lib';
-import { Markmap } from 'markmap-view';
+import { useEffect, useRef, useCallback } from 'react';
+import MindMap from 'simple-mind-map';
+import Export from 'simple-mind-map/src/plugins/Export.js';
+import { getNodeRichTextStyles, addXmlns } from 'simple-mind-map/src/utils/index.js';
+import katex from 'katex';
+import { transformToSimpleMindMap } from '../utils/markdown-to-simple-mind-map';
+import { useSidebar } from '../context/SidebarContext';
 import { Plus, Minus, ArrowsOut } from '@phosphor-icons/react';
-import * as d3 from 'd3';
 
-const transformer = new Transformer();
+const registerExportPlugin = MindMap.usePlugin.bind(MindMap);
+registerExportPlugin(Export);
 
 const isDark = () => !document.documentElement.classList.contains('light');
 
-const getCssToken = (name) =>
-  getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+function buildBaseTheme(dark) {
+  return {
+    backgroundColor: 'transparent',
+    lineColor: dark ? 'rgba(255,255,255,0.35)' : 'rgba(0,0,0,0.25)',
+    lineWidth: 2,
+    lineStyle: 'curve',
+    root: {
+      fillColor: dark ? 'rgba(80, 80, 120, 0.9)' : 'rgba(200, 195, 255, 0.9)',
+      color: dark ? '#ffffff' : '#1e1b4b',
+      fontSize: 14,
+      fontWeight: 'bold',
+      borderRadius: 10,
+      shape: 'roundedRectangle',
+      paddingX: 0,
+      paddingY: 0,
+    },
+    second: {
+      fillColor: dark ? 'rgba(120, 120, 180, 0.75)' : 'rgba(220, 225, 255, 0.85)',
+      color: dark ? '#ffffff' : '#1e1b4b',
+      fontSize: 12,
+      fontWeight: 'bold',
+      borderRadius: 8,
+      shape: 'roundedRectangle',
+      paddingX: 0,
+      paddingY: 0,
+    },
+    node: {
+      fillColor: dark ? 'rgba(80, 80, 110, 0.55)' : 'rgba(230, 235, 255, 0.65)',
+      color: dark ? '#ffffff' : '#1e1b4b',
+      fontSize: 10,
+      borderRadius: 5,
+      shape: 'roundedRectangle',
+      paddingX: 0,
+      paddingY: 0,
+    },
+  };
+}
 
-const MARKMAP_OPTIONS = {
-  spacingHorizontal: 110,
-  spacingVertical: 14,
-  paddingX: 8,
-  duration: 300,
-  // connector colour — set low-opacity; overridden in styleNodes too
-  color: () => isDark()
-    ? 'rgba(130, 120, 210, 0.22)'
-    : 'rgba(100, 90, 180, 0.20)',
-};
+MindMap.defineTheme('lecturemind-light', buildBaseTheme(false));
+MindMap.defineTheme('lecturemind-dark', buildBaseTheme(true));
 
-/* ── Style all SVG nodes after render ── */
-const styleNodes = (svgEl) => {
-  if (!svgEl) return;
-  const dark = isDark();
-  const svg = d3.select(svgEl);
+function getBranchLineColor(node, fallback) {
+  return node?.getData?.('branchColor') || fallback;
+}
 
-  svg.selectAll('.lm-bubble').remove();
+function runAfterRender(instance, fn) {
+  const wrapper = () => {
+    fn();
+    instance.off('node_tree_render_end', wrapper);
+  };
+  instance.on('node_tree_render_end', wrapper);
+}
 
-  // Hide default underline
-  svg.selectAll('.markmap-node > line')
-    .style('stroke-opacity', '0')
-    .style('display', 'none');
-
-  // Bezier connector lines — barely visible, matching NeetCode thinness
-  svg.selectAll('.markmap-link')
-    .style('stroke', dark ? 'rgba(120, 112, 200, 0.28)' : 'rgba(90, 80, 180, 0.22)')
-    .style('stroke-width', '1px')
-    .style('stroke-opacity', '1')
-    .style('fill', 'none');
-
-  // Circle toggle dots — small, subtle
-  svg.selectAll('.markmap-node > circle')
-    .style('fill', dark ? '#1e1e2e' : '#f0eeff')
-    .style('stroke', dark ? 'rgba(130,120,210,0.5)' : 'rgba(100,90,180,0.4)')
-    .style('stroke-width', '1px')
-    .style('r', '3.5px');
-
-  // Node cards
-  svg.selectAll('g.markmap-node').each(function () {
-    const g     = d3.select(this);
-    const datum = g.datum();
-    const depth = datum?.state?.depth ?? datum?.depth ?? 0;
-    const isRoot = depth === 0;
-    const isL1   = depth === 1;
-
-    const cardDiv = g.select('.markmap-foreign > div > div');
-    const target  = cardDiv.empty() ? g.select('.markmap-foreign div') : cardDiv;
-    if (target.empty()) return;
-
-    const el = target.node();
-
-    // NeetCode palette:
-    // Dark → periwinkle-slate: bg #2e2c5e→#35326e, border rgba(99,102,200,0.45)
-    // Light → soft indigo tint: bg #eeeeff, border rgba(100,90,200,0.3)
-    let bg, border;
-    if (dark) {
-      bg     = isRoot ? 'rgba(66,62,140,0.85)' : isL1 ? 'rgba(58,54,120,0.75)' : 'rgba(52,48,108,0.65)';
-      border = isRoot ? 'rgba(130,120,240,0.60)' : 'rgba(110,100,210,0.40)';
-    } else {
-      bg     = isRoot ? 'rgba(200,195,255,0.85)' : isL1 ? 'rgba(215,210,255,0.80)' : 'rgba(225,220,255,0.75)';
-      border = isRoot ? 'rgba(80,70,180,0.50)' : 'rgba(100,90,200,0.35)';
-    }
-
-    const textColor = dark ? '#ffffff' : '#1e1b4b';
-
-    el.style.backgroundColor = bg;
-    el.style.border = `1px solid ${border}`;
-    el.style.color = textColor;
-    el.style.borderRadius = isRoot ? '8px' : '5px';
-    el.style.boxShadow = 'none';
-    el.style.fontFamily = "'Inter', ui-sans-serif, system-ui, sans-serif";
-    el.style.fontSize = isRoot ? '13px' : '11.5px';
-    el.style.fontWeight = isRoot ? '700' : isL1 ? '600' : '500';
-    el.style.padding = isRoot ? '5px 14px' : '3px 10px';
-    el.style.lineHeight = '1.4';
-    el.style.whiteSpace = 'nowrap';
-    el.style.letterSpacing = isRoot ? '-0.01em' : '0';
-
-    // Explicitly enforce textColor and typographic spacing on all KaTeX math text & symbols
-    el.querySelectorAll('.katex').forEach((kEl) => {
-      kEl.style.margin = '0 0.35em';
-      kEl.style.display = 'inline-block';
-    });
-    el.querySelectorAll('.katex, .katex *').forEach((kEl) => {
-      kEl.style.color = textColor;
-    });
-  });
-};
-
-/* ── Zoom control button ── */
 function ZoomBtn({ onClick, title, children }) {
   return (
     <button
@@ -113,12 +76,12 @@ function ZoomBtn({ onClick, title, children }) {
         border: '1px solid var(--color-border)',
         color: 'var(--color-text-muted)',
       }}
-      onMouseEnter={e => {
+      onMouseEnter={(e) => {
         e.currentTarget.style.backgroundColor = 'var(--color-surface-overlay)';
         e.currentTarget.style.color = 'var(--color-text)';
         e.currentTarget.style.borderColor = 'var(--color-border-subtle)';
       }}
-      onMouseLeave={e => {
+      onMouseLeave={(e) => {
         e.currentTarget.style.backgroundColor = 'var(--color-surface-alt)';
         e.currentTarget.style.color = 'var(--color-text-muted)';
         e.currentTarget.style.borderColor = 'var(--color-border)';
@@ -129,73 +92,211 @@ function ZoomBtn({ onClick, title, children }) {
   );
 }
 
-export default function MindmapViewer({
-  markdown,
-}) {
-  const svgRef      = useRef(null);
-  const markmapRef  = useRef(null);
+export default function MindmapViewer({ markdown }) {
+  const containerRef = useRef(null);
+  const mapRef = useRef(null);
+  const { sidebarOpen } = useSidebar();
 
-  const applyStyles = useCallback(() => {
-    if (!svgRef.current) return;
-    requestAnimationFrame(() => {
-      styleNodes(svgRef.current);
-      setTimeout(() => styleNodes(svgRef.current), 350);
+  const createMap = useCallback(() => {
+    if (!containerRef.current) return null;
+
+    const instance = new MindMap({
+      el: containerRef.current,
+      layout: 'mindMap',
+      theme: isDark() ? 'lecturemind-dark' : 'lecturemind-light',
+      readonly: true,
+      fit: true,
+      fitPadding: 40,
+      mousewheelAction: 'zoom',
+      minZoomRatio: 20,
+      maxZoomRatio: 400,
+      scaleRatio: 0.1,
+      textAutoWrapWidth: 1800,
+      initRootNodePosition: ['center', 'center'],
+      alwaysShowExpandBtn: false,
+      isUseCustomNodeContent: true,
+      customCreateNodeContent: (node) => {
+        if (!node.getData('richText')) return null;
+        const text = node.getData('text');
+        if (!text) return null;
+
+        const MAX_WIDTH = 1400;
+
+        const buildWrapper = () => {
+          const wrapper = document.createElement('div');
+          wrapper.innerHTML = `<div>${text}</div>`;
+          const el = wrapper.children[0];
+          el.classList.add('smm-richtext-node-wrap');
+
+          const styles = getNodeRichTextStyles(node);
+          Object.entries(styles).forEach(([prop, value]) => {
+            if (value != null) el.style[prop] = value;
+          });
+
+          el.style.display = 'inline-block';
+          el.style.textAlign = 'center';
+          el.style.verticalAlign = 'middle';
+          el.style.lineHeight = '1.7';
+          el.style.boxSizing = 'border-box';
+          // All spacing is handled here; theme padding is set to 0
+          el.style.padding = '0.4em 0.7em';
+          return el;
+        };
+
+        // Measure the natural (max-content) width so math isn't squeezed.
+        // We render after fonts are ready, so this measurement is accurate.
+        const measureEl = buildWrapper();
+        measureEl.style.width = 'max-content';
+        measureEl.style.whiteSpace = 'normal';
+        const measureContainer = document.createElement('div');
+        measureContainer.style.cssText = 'position:fixed;left:-99999px;top:-99999px;';
+        measureContainer.appendChild(measureEl);
+        document.body.appendChild(measureContainer);
+        const naturalWidth = measureEl.getBoundingClientRect().width;
+        document.body.removeChild(measureContainer);
+
+        const el = buildWrapper();
+        el.style.width = `${Math.min(naturalWidth, MAX_WIDTH)}px`;
+        el.style.maxWidth = `${MAX_WIDTH}px`;
+        el.style.whiteSpace = 'normal';
+        el.style.wordBreak = 'break-word';
+        el.style.overflowWrap = 'break-word';
+
+        addXmlns(el);
+        return el;
+      },
+      customHandleLine: (node, line, { width, color, dasharray }) => {
+        line.stroke({
+          color: getBranchLineColor(node, color),
+          width,
+          dasharray,
+        });
+      },
     });
+
+    window.__lecturemind_markmap = instance;
+    window.__lecturemind_fit_mindmap = () => instance.view.fit();
+
+    return instance;
   }, []);
 
-  /* Initial render & Global fit registration */
   useEffect(() => {
-    window.__lecturemind_fit_mindmap = () => {
-      markmapRef.current?.fit();
-    };
-    return () => {
-      delete window.__lecturemind_fit_mindmap;
+    if (!containerRef.current) return undefined;
+
+    const instance = createMap();
+    mapRef.current = instance;
+
+    let resizeTimeout = null;
+    const resizeObserver = new ResizeObserver(() => {
+      clearTimeout(resizeTimeout);
+      resizeTimeout = setTimeout(() => {
+        instance.resize();
+      }, 120);
+    });
+    resizeObserver.observe(containerRef.current);
+
+  return () => {
+      clearTimeout(resizeTimeout);
+      resizeObserver.disconnect();
+      mapRef.current?.destroy();
+      mapRef.current = null;
       delete window.__lecturemind_markmap;
+      delete window.__lecturemind_fit_mindmap;
     };
-  }, []);
+  }, [createMap]);
 
   useEffect(() => {
-    if (!svgRef.current) return;
-    if (!markmapRef.current) {
-      markmapRef.current = Markmap.create(svgRef.current, MARKMAP_OPTIONS);
+    const instance = mapRef.current;
+    if (!instance || !markdown) return;
+
+    // Render a hidden probe so KaTeX fonts start loading before we measure nodes.
+    const probe = document.createElement('div');
+    probe.style.cssText = 'position:fixed;left:-9999px;top:-9999px;visibility:hidden;';
+    probe.innerHTML = katex.renderToString(
+      'f(z) = \\sum_{k=1}^{\\infty} z^{2^k} \\approx \\frac{1}{2\\pi\\sigma^2} \\iint_{\\Omega} e^{-(x^2+y^2)/(2\\sigma^2)} dx\\,dy',
+      { throwOnError: false }
+    );
+    document.body.appendChild(probe);
+
+    let fallbackTimeout = null;
+
+    const doRender = () => {
+      if (!mapRef.current || !markdown) return;
+      try {
+        const data = transformToSimpleMindMap(markdown);
+        mapRef.current.setData(data);
+        runAfterRender(mapRef.current, () => {
+          try {
+            mapRef.current?.view?.fit();
+          } catch (e) {
+            // ignore fit errors on unmounted/empty maps
+          }
+        });
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error('Failed to transform markdown for simple-mind-map:', err);
+      }
+    };
+
+    const start = async () => {
+      await document.fonts.ready;
+      document.body.removeChild(probe);
+      doRender();
+      // One extra pass after fonts fully settle, in case the probe didn't
+      // trigger every glyph used by the actual mindmap.
+      fallbackTimeout = setTimeout(doRender, 400);
+    };
+
+    start();
+
+    return () => {
+      clearTimeout(fallbackTimeout);
+      if (probe.parentNode) document.body.removeChild(probe);
+    };
+  }, [markdown]);
+
+  useEffect(() => {
+    const observer = new MutationObserver(() => {
+
+
+      const instance = mapRef.current;
+      if (!instance || !markdown) return;
+
+      try {
+        const transform = instance.view.getTransformData();
+        instance.setTheme(isDark() ? 'lecturemind-dark' : 'lecturemind-light');
+        instance.setData(transformToSimpleMindMap(markdown));
+        runAfterRender(instance, () => instance.view.setTransformData(transform));
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error('Failed to update mindmap theme:', err);
+      }
+    });
+
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['class'],
+    });
+
+    return () => observer.disconnect();
+  }, [markdown]);
+
+  const handleZoomIn = () => mapRef.current?.view?.enlarge();
+  const handleZoomOut = () => mapRef.current?.view?.narrow();
+  const handleFit = () => {
+    try {
+      mapRef.current?.view?.fit();
+    } catch (e) {
+      // ignore
     }
-    window.__lecturemind_markmap = markmapRef.current;
-    if (markdown) {
-      const { root } = transformer.transform(markdown);
-      markmapRef.current.setData(root, MARKMAP_OPTIONS);
-      markmapRef.current.fit();
-      applyStyles();
-    }
-  }, [markdown, applyStyles]);
-
-  /* Re-style on theme toggle */
-  useEffect(() => {
-    const obs = new MutationObserver(() => { if (markdown) applyStyles(); });
-    obs.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
-    return () => obs.disconnect();
-  }, [markdown, applyStyles]);
-
-  /* Re-style on branch toggle click */
-  useEffect(() => {
-    const svgEl = svgRef.current;
-    if (!svgEl) return;
-    const fn = () => setTimeout(applyStyles, 260);
-    svgEl.addEventListener('click', fn);
-    return () => svgEl.removeEventListener('click', fn);
-  }, [applyStyles]);
-
-  /* ── Zoom handlers ── */
-  const handleZoomIn  = () => markmapRef.current?.rescale(1.3);
-  const handleZoomOut = () => markmapRef.current?.rescale(0.75);
-  const handleFit     = () => markmapRef.current?.fit();
+  };
 
   return (
-    /* No border/card — mindmap floats directly on dot-grid canvas */
     <div id="mindmap-viewport-container" className="w-full h-full relative overflow-hidden">
-      <svg
-        ref={svgRef}
-        className="w-full h-full markmap"
-        style={{ overflow: 'visible', display: 'block' }}
+      <div
+        ref={containerRef}
+        className="w-full h-full"
+        style={{ minHeight: '100%', height: '100%', position: 'relative' }}
       />
 
       {!markdown && (
@@ -207,21 +308,28 @@ export default function MindmapViewer({
         </div>
       )}
 
-      {/* ── Zoom controls — bottom-left floating overlay ── */}
       {markdown && (
         <div
-          className="markmap-zoom-controls absolute bottom-4 left-4 z-10 flex flex-col gap-1 p-1 rounded-lg"
+          className={`markmap-zoom-controls absolute bottom-4 z-30 flex flex-col gap-1 p-1 rounded-lg transition-all duration-250 ease-in-out ${
+            sidebarOpen ? 'left-[248px]' : 'left-4'
+          }`}
           style={{
             backgroundColor: 'var(--color-surface)',
             border: '1px solid var(--color-border)',
             boxShadow: '0 4px 20px rgba(0,0,0,0.25)',
           }}
         >
-          <ZoomBtn onClick={handleZoomIn}  title="Zoom in">  <Plus   size={13} weight="bold" /></ZoomBtn>
+          <ZoomBtn onClick={handleZoomIn} title="Zoom in">
+            <Plus size={13} weight="bold" />
+          </ZoomBtn>
           <div className="h-px mx-1" style={{ backgroundColor: 'var(--color-border)' }} />
-          <ZoomBtn onClick={handleZoomOut} title="Zoom out"> <Minus  size={13} weight="bold" /></ZoomBtn>
+          <ZoomBtn onClick={handleZoomOut} title="Zoom out">
+            <Minus size={13} weight="bold" />
+          </ZoomBtn>
           <div className="h-px mx-1" style={{ backgroundColor: 'var(--color-border)' }} />
-          <ZoomBtn onClick={handleFit}     title="Fit view"> <ArrowsOut size={13} /></ZoomBtn>
+          <ZoomBtn onClick={handleFit} title="Fit view">
+            <ArrowsOut size={13} />
+          </ZoomBtn>
         </div>
       )}
     </div>

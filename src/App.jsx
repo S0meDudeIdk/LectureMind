@@ -194,7 +194,7 @@ export default function App() {
     >
       {/* ── Empty state ── */}
       {!activeMarkdown && !isProcessing && (
-        <div className="flex flex-col items-center justify-center h-full">
+        <div className="empty-state-wrapper flex flex-col items-center justify-center h-full">
           <ErrorBanner message={error} onDismiss={reset} />
           <DropZone onFileSelect={handleFileSelect} />
         </div>
