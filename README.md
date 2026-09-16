@@ -70,6 +70,11 @@ Create a `.env` file in the project root based on `.env.example`:
 GOOGLE_CLOUD_PROJECT=your_gcp_project_id
 GOOGLE_CLOUD_LOCATION=us-central1
 
+# Google Cloud Credentials (never commit key files to GitHub!)
+# Option A (Local dev): Place service-account-key.json in root (auto-detected & ignored by git)
+# Option B (File path): GOOGLE_APPLICATION_CREDENTIALS=/path/to/key.json
+# Option C (GitHub Secrets / Cloud Run / Docker): GOOGLE_APPLICATION_CREDENTIALS_JSON={"type":"service_account",...}
+
 # Firebase Configuration (Required for cloud sync & authentication)
 VITE_FIREBASE_API_KEY=your_firebase_api_key
 VITE_FIREBASE_AUTH_DOMAIN=your_project_id.firebaseapp.com

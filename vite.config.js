@@ -525,15 +525,63 @@ function geminiApiPlugin() {
     name: 'gemini-api-plugin',
     config(_, { mode }) {
       const env = loadEnv(mode, process.cwd(), '');
-      const project = env.GOOGLE_CLOUD_PROJECT || '';
-      const location = env.GOOGLE_CLOUD_LOCATION || 'us-central1';
-      gcsAnonymousBucket = env.GCS_ANONYMOUS_BUCKET || '';
+      const localKeyPath = path.join(process.cwd(), 'service-account-key.json');
+      let serviceAccountData = null;
 
-      // Allow service-account key path to be set via .env so the Google auth
-      // library can pick it up without gcloud CLI installed.
-      if (env.GOOGLE_APPLICATION_CREDENTIALS) {
-        process.env.GOOGLE_APPLICATION_CREDENTIALS = env.GOOGLE_APPLICATION_CREDENTIALS;
+      // 1. Support inline JSON service account credentials from env (ideal for GitHub Secrets / Docker / Cloud Run)
+      const credentialsJson =
+        env.GOOGLE_APPLICATION_CREDENTIALS_JSON ||
+        env.GCP_SERVICE_ACCOUNT_KEY ||
+        process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON ||
+        process.env.GCP_SERVICE_ACCOUNT_KEY;
+
+      if (credentialsJson) {
+        try {
+          const trimmed = credentialsJson.trim();
+          const decoded = trimmed.startsWith('{')
+            ? trimmed
+            : Buffer.from(trimmed, 'base64').toString('utf8');
+          serviceAccountData = JSON.parse(decoded);
+          const tmpKeyPath = path.join(os.tmpdir(), `gcp_sa_creds.json`);
+          fs.writeFileSync(tmpKeyPath, JSON.stringify(serviceAccountData), { mode: 0o600 });
+          process.env.GOOGLE_APPLICATION_CREDENTIALS = tmpKeyPath;
+          console.log(`[Credentials] Loaded service account credentials from environment for project: ${serviceAccountData.project_id}`);
+        } catch (e) {
+          console.warn('[Credentials] Failed to parse GOOGLE_APPLICATION_CREDENTIALS_JSON:', e.message);
+        }
+      } else if (env.GOOGLE_APPLICATION_CREDENTIALS || process.env.GOOGLE_APPLICATION_CREDENTIALS) {
+        // 2. Custom path from env
+        const customPath = env.GOOGLE_APPLICATION_CREDENTIALS || process.env.GOOGLE_APPLICATION_CREDENTIALS;
+        const resolvedPath = path.isAbsolute(customPath) ? customPath : path.join(process.cwd(), customPath);
+        if (fs.existsSync(resolvedPath)) {
+          process.env.GOOGLE_APPLICATION_CREDENTIALS = resolvedPath;
+          try {
+            serviceAccountData = JSON.parse(fs.readFileSync(resolvedPath, 'utf8'));
+            console.log(`[Credentials] Loaded service account from ${customPath} for project: ${serviceAccountData.project_id}`);
+          } catch (_) {}
+        }
+      } else if (fs.existsSync(localKeyPath)) {
+        // 3. Auto-detect local service-account-key.json in project root
+        process.env.GOOGLE_APPLICATION_CREDENTIALS = localKeyPath;
+        try {
+          serviceAccountData = JSON.parse(fs.readFileSync(localKeyPath, 'utf8'));
+          console.log(`[Credentials] Auto-detected local service-account-key.json for project: ${serviceAccountData.project_id}`);
+        } catch (_) {}
       }
+
+      const project =
+        env.GOOGLE_CLOUD_PROJECT ||
+        process.env.GOOGLE_CLOUD_PROJECT ||
+        serviceAccountData?.project_id ||
+        '';
+      const location =
+        env.GOOGLE_CLOUD_LOCATION ||
+        process.env.GOOGLE_CLOUD_LOCATION ||
+        'us-central1';
+      gcsAnonymousBucket =
+        env.GCS_ANONYMOUS_BUCKET ||
+        process.env.GCS_ANONYMOUS_BUCKET ||
+        '';
 
       vertexClient = project ? createVertexClient(project, location) : null;
       // Storage client uses GOOGLE_APPLICATION_CREDENTIALS already exported in the environment.
