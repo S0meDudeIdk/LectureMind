@@ -150,10 +150,20 @@ async function extractAudioViaMediaRecorder(file, onProgress) {
     const fileUrl = URL.createObjectURL(file);
     video.src = fileUrl;
 
+    const removeVideoElement = () => {
+      if (video && video.parentNode) {
+        try {
+          video.parentNode.removeChild(video);
+        } catch (e) {
+          // ignore already removed
+        }
+      }
+    };
+
     const cleanup = (blob) => {
       URL.revokeObjectURL(fileUrl);
       video.pause();
-      document.body.removeChild(video);
+      removeVideoElement();
 
       if (!blob || blob.size < 1000) {
         console.warn('[MediaProcessor] MediaRecorder produced empty audio.');
@@ -175,7 +185,7 @@ async function extractAudioViaMediaRecorder(file, onProgress) {
 
     video.onerror = (e) => {
       URL.revokeObjectURL(fileUrl);
-      document.body.removeChild(video);
+      removeVideoElement();
       reject(new Error('Video element failed to load for MediaRecorder: ' + e));
     };
 
@@ -184,7 +194,7 @@ async function extractAudioViaMediaRecorder(file, onProgress) {
         // Capture audio stream from the video element
         const stream = video.captureStream ? video.captureStream() : video.mozCaptureStream?.();
         if (!stream) {
-          document.body.removeChild(video);
+          removeVideoElement();
           URL.revokeObjectURL(fileUrl);
           resolve(null);
           return;
@@ -193,7 +203,7 @@ async function extractAudioViaMediaRecorder(file, onProgress) {
         // Keep only the audio tracks to produce a small audio-only stream
         const audioTracks = stream.getAudioTracks();
         if (!audioTracks.length) {
-          document.body.removeChild(video);
+          removeVideoElement();
           URL.revokeObjectURL(fileUrl);
           resolve(null);
           return;
@@ -236,7 +246,7 @@ async function extractAudioViaMediaRecorder(file, onProgress) {
           audioTracks.forEach((t) => t.stop());
         };
       } catch (err) {
-        document.body.removeChild(video);
+        removeVideoElement();
         URL.revokeObjectURL(fileUrl);
         reject(err);
       }

@@ -58,11 +58,20 @@ function getBranchLineColor(node, fallback) {
 }
 
 function runAfterRender(instance, fn) {
+  if (!instance) return;
   const wrapper = () => {
-    fn();
-    instance.off('node_tree_render_end', wrapper);
+    try {
+      instance.off('node_tree_render_end', wrapper);
+    } catch {}
+    try {
+      fn();
+    } catch (err) {
+      console.warn('[MindmapViewer] Error in afterRender callback:', err);
+    }
   };
-  instance.on('node_tree_render_end', wrapper);
+  try {
+    instance.on('node_tree_render_end', wrapper);
+  } catch {}
 }
 
 function ZoomBtn({ onClick, title, children }) {
@@ -105,7 +114,7 @@ export default function MindmapViewer({ markdown }) {
       layout: 'mindMap',
       theme: isDark() ? 'lecturemind-dark' : 'lecturemind-light',
       readonly: true,
-      fit: true,
+      fit: false,
       fitPadding: 40,
       mousewheelAction: 'zoom',
       minZoomRatio: 20,
@@ -153,7 +162,11 @@ export default function MindmapViewer({ markdown }) {
         measureContainer.appendChild(measureEl);
         document.body.appendChild(measureContainer);
         const naturalWidth = measureEl.getBoundingClientRect().width;
-        document.body.removeChild(measureContainer);
+        if (measureContainer.parentNode) {
+          try {
+            measureContainer.parentNode.removeChild(measureContainer);
+          } catch {}
+        }
 
         const el = buildWrapper();
         el.style.width = `${Math.min(naturalWidth, MAX_WIDTH)}px`;
@@ -174,8 +187,60 @@ export default function MindmapViewer({ markdown }) {
       },
     });
 
+    // Guard SVG element rbox calculations against detached DOM element errors
+    if (instance.draw) {
+      try {
+        const proto = Object.getPrototypeOf(instance.draw);
+        if (proto && proto.rbox && !proto.__rbox_guarded__) {
+          const origProtoRbox = proto.rbox;
+          proto.rbox = function (el) {
+            try {
+              return origProtoRbox.call(this, el);
+            } catch {
+              const rect = this.node?.getBoundingClientRect?.() || {
+                left: 0,
+                top: 0,
+                width: 0,
+                height: 0,
+              };
+              return {
+                x: rect.left || 0,
+                y: rect.top || 0,
+                width: Math.max(0, rect.width || 0),
+                height: Math.max(0, rect.height || 0),
+                addOffset() {
+                  return this;
+                },
+                transform() {
+                  return this;
+                },
+              };
+            }
+          };
+          proto.__rbox_guarded__ = true;
+        }
+      } catch {}
+    }
+
+    // Guard fit method against detached container / unmounted state
+    const origFit = instance.view.fit.bind(instance.view);
+    instance.view.fit = (...args) => {
+      if (!containerRef.current || !document.body.contains(containerRef.current)) return;
+      if (!instance.draw?.node || !document.body.contains(instance.draw.node)) return;
+      if (containerRef.current.clientWidth <= 0 || containerRef.current.clientHeight <= 0) return;
+      try {
+        return origFit(...args);
+      } catch {
+        // Suppress benign rbox or layout errors during DOM transitions
+      }
+    };
+
     window.__lecturemind_markmap = instance;
-    window.__lecturemind_fit_mindmap = () => instance.view.fit();
+    window.__lecturemind_fit_mindmap = () => {
+      try {
+        instance.view.fit();
+      } catch {}
+    };
 
     return instance;
   }, []);
@@ -190,15 +255,26 @@ export default function MindmapViewer({ markdown }) {
     const resizeObserver = new ResizeObserver(() => {
       clearTimeout(resizeTimeout);
       resizeTimeout = setTimeout(() => {
-        instance.resize();
+        if (
+          mapRef.current &&
+          containerRef.current &&
+          document.body.contains(containerRef.current) &&
+          containerRef.current.clientWidth > 0
+        ) {
+          try {
+            instance.resize();
+          } catch {}
+        }
       }, 120);
     });
     resizeObserver.observe(containerRef.current);
 
-  return () => {
+    return () => {
       clearTimeout(resizeTimeout);
       resizeObserver.disconnect();
-      mapRef.current?.destroy();
+      try {
+        mapRef.current?.destroy();
+      } catch {}
       mapRef.current = null;
       delete window.__lecturemind_markmap;
       delete window.__lecturemind_fit_mindmap;
@@ -206,11 +282,14 @@ export default function MindmapViewer({ markdown }) {
   }, [createMap]);
 
   useEffect(() => {
-    const instance = mapRef.current;
-    if (!instance || !markdown) return;
+    let isCancelled = false;
+    let fallbackTimeout = null;
+    let probe = null;
+
+    if (!markdown) return undefined;
 
     // Render a hidden probe so KaTeX fonts start loading before we measure nodes.
-    const probe = document.createElement('div');
+    probe = document.createElement('div');
     probe.style.cssText = 'position:fixed;left:-9999px;top:-9999px;visibility:hidden;';
     probe.innerHTML = katex.renderToString(
       'f(z) = \\sum_{k=1}^{\\infty} z^{2^k} \\approx \\frac{1}{2\\pi\\sigma^2} \\iint_{\\Omega} e^{-(x^2+y^2)/(2\\sigma^2)} dx\\,dy',
@@ -218,57 +297,74 @@ export default function MindmapViewer({ markdown }) {
     );
     document.body.appendChild(probe);
 
-    let fallbackTimeout = null;
+    const safeRemoveProbe = () => {
+      if (probe && probe.parentNode) {
+        try {
+          probe.parentNode.removeChild(probe);
+        } catch {}
+      }
+      probe = null;
+    };
 
     const doRender = () => {
-      if (!mapRef.current || !markdown) return;
+      if (isCancelled || !mapRef.current || !markdown) return;
       try {
         const data = transformToSimpleMindMap(markdown);
+        if (isCancelled || !mapRef.current) return;
         mapRef.current.setData(data);
         runAfterRender(mapRef.current, () => {
-          try {
-            mapRef.current?.view?.fit();
-          } catch (e) {
-            // ignore fit errors on unmounted/empty maps
+          if (!isCancelled && mapRef.current) {
+            try {
+              mapRef.current.view?.fit();
+            } catch {}
           }
         });
       } catch (err) {
-        // eslint-disable-next-line no-console
         console.error('Failed to transform markdown for simple-mind-map:', err);
       }
     };
 
     const start = async () => {
-      await document.fonts.ready;
-      document.body.removeChild(probe);
+      try {
+        await document.fonts.ready;
+      } catch {}
+      safeRemoveProbe();
+      if (isCancelled) return;
       doRender();
-      // One extra pass after fonts fully settle, in case the probe didn't
-      // trigger every glyph used by the actual mindmap.
-      fallbackTimeout = setTimeout(doRender, 400);
+      fallbackTimeout = setTimeout(() => {
+        if (!isCancelled) doRender();
+      }, 400);
     };
 
     start();
 
     return () => {
+      isCancelled = true;
       clearTimeout(fallbackTimeout);
-      if (probe.parentNode) document.body.removeChild(probe);
+      safeRemoveProbe();
     };
   }, [markdown]);
 
   useEffect(() => {
+    let isCancelled = false;
     const observer = new MutationObserver(() => {
-
-
+      if (isCancelled) return;
       const instance = mapRef.current;
       if (!instance || !markdown) return;
+      if (!containerRef.current || !document.body.contains(containerRef.current)) return;
 
       try {
         const transform = instance.view.getTransformData();
         instance.setTheme(isDark() ? 'lecturemind-dark' : 'lecturemind-light');
         instance.setData(transformToSimpleMindMap(markdown));
-        runAfterRender(instance, () => instance.view.setTransformData(transform));
+        runAfterRender(instance, () => {
+          if (!isCancelled && mapRef.current) {
+            try {
+              instance.view.setTransformData(transform);
+            } catch {}
+          }
+        });
       } catch (err) {
-        // eslint-disable-next-line no-console
         console.error('Failed to update mindmap theme:', err);
       }
     });
@@ -278,7 +374,10 @@ export default function MindmapViewer({ markdown }) {
       attributeFilter: ['class'],
     });
 
-    return () => observer.disconnect();
+    return () => {
+      isCancelled = true;
+      observer.disconnect();
+    };
   }, [markdown]);
 
   const handleZoomIn = () => mapRef.current?.view?.enlarge();
@@ -286,9 +385,7 @@ export default function MindmapViewer({ markdown }) {
   const handleFit = () => {
     try {
       mapRef.current?.view?.fit();
-    } catch (e) {
-      // ignore
-    }
+    } catch {}
   };
 
   return (
