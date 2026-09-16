@@ -4,6 +4,11 @@
  * 2. Visual slide snapshot sampling from video canvas.
  */
 
+import { initFfmpeg, getMediaDurationFfmpeg } from './audioExtractor.js';
+
+/** File size threshold above which ffmpeg is used for duration extraction (100 MB). */
+const FFPROBE_FALLBACK_SIZE_BYTES = 100 * 1024 * 1024;
+
 /**
  * Convert an AudioBuffer to a standard 16-bit PCM WAV Blob.
  */
@@ -240,12 +245,11 @@ async function extractAudioViaMediaRecorder(file, onProgress) {
 }
 
 /**
- * Fast helper: inspect media duration (in seconds) without full loading.
+ * Native video/audio element duration probe.
  * @param {File} file - Audio or video file
- * @returns {Promise<number>} - Duration in seconds (or 0 if unavailable)
+ * @returns {Promise<number>} - Duration in seconds (0 if unavailable)
  */
-export async function getMediaDuration(file) {
-  if (!file) return 0;
+function getMediaDurationNative(file) {
   const isVideo = file.type?.startsWith('video/') || /\.(mp4|mov|webm|mkv|avi|wmv)$/i.test(file.name || '');
   return new Promise((resolve) => {
     const el = document.createElement(isVideo ? 'video' : 'audio');
@@ -275,6 +279,34 @@ export async function getMediaDuration(file) {
       resolve(0);
     }, 3500);
   });
+}
+
+/**
+ * Fast helper: inspect media duration (in seconds).
+ * Tries a native video/audio element first, then falls back to ffmpeg.wasm
+ * for large files or when the native probe returns an invalid duration.
+ * @param {File} file - Audio or video file
+ * @returns {Promise<number>} - Duration in seconds (or 0 if unavailable)
+ */
+export async function getMediaDuration(file) {
+  if (!file) return 0;
+
+  const nativeDuration = await getMediaDurationNative(file);
+  const isNativeValid = Number.isFinite(nativeDuration) && nativeDuration > 0;
+  const needsFfmpegFallback = !isNativeValid || file.size > FFPROBE_FALLBACK_SIZE_BYTES;
+
+  if (!needsFfmpegFallback) {
+    return nativeDuration;
+  }
+
+  try {
+    await initFfmpeg();
+    const ffmpegDuration = await getMediaDurationFfmpeg(file);
+    return Number.isFinite(ffmpegDuration) && ffmpegDuration > 0 ? ffmpegDuration : 0;
+  } catch (err) {
+    console.warn('[MediaProcessor] ffmpeg duration fallback failed:', err);
+    return 0;
+  }
 }
 
 /**

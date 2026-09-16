@@ -572,3 +572,21 @@ html:not(.light) .cm-task-checkbox-box:hover {
   opacity: 0.65;
 }
 
+/* ── simple-mind-map rich text nodes ── */
+.smm-richtext-node-wrap {
+  padding: 0.35em 0.5em 0.55em;
+  line-height: 1.7;
+}
+
+.smm-richtext-node-wrap .katex {
+  vertical-align: middle;
+}
+
+/* Center empty-state content in the visible area when the floating sidebar is open */
+.empty-state-wrapper {
+  transition: padding-left 0.25s ease;
+}
+main.sidebar-open .empty-state-wrapper {
+  padding-left: 240px;
+}
+

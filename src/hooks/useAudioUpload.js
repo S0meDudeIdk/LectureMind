@@ -3,6 +3,7 @@ import { generateLectureContent, generateLectureContentFromUpload } from '../ser
 import { saveMindmap, updateMindmap, extractTitleFromMarkdown } from '../services/db';
 import { saveMediaToLocalDb } from '../services/mediaDb';
 import { uploadMediaToCloud } from '../services/storage';
+import { extractAudioFromVideo } from '../services/audioExtractor';
 import { isAnonymous } from '../utils/authLimits';
 
 export function useAudioUpload({ user, canGenerate, incrementGeneration } = {}) {
@@ -73,14 +74,40 @@ export function useAudioUpload({ user, canGenerate, incrementGeneration } = {}) 
         console.warn("Initial mindmap save failed:", saveErr);
       }
 
+      // For large video files, extract the audio track to reduce upload size
+      // and improve processing reliability. Fallback to original video if extraction fails.
+      const LARGE_VIDEO_THRESHOLD_BYTES = 50 * 1024 * 1024;
+      const shouldExtractAudio = fileIsVideo && file.size > LARGE_VIDEO_THRESHOLD_BYTES;
+      let processingFile = file;
+
+      if (shouldExtractAudio) {
+        setProgressMsg('Extracting audio track from video...');
+        try {
+          const extractedAudio = await extractAudioFromVideo(file, (progress) => {
+            const pct = Math.round(progress * 100);
+            setProgressMsg(`Extracting audio track (${pct}%)...`);
+          });
+
+          if (extractedAudio) {
+            processingFile = extractedAudio;
+            setProgressMsg('Audio extraction complete.');
+          } else {
+            setProgressMsg('Audio extraction unavailable, using original video...');
+          }
+        } catch (extractErr) {
+          console.warn('[useAudioUpload] Audio extraction failed:', extractErr);
+          setProgressMsg('Audio extraction failed, using original video...');
+        }
+      }
+
       let cleanMarkdown = '';
       let cleanNotes = '';
       let transcriptChunks = [];
 
       if (isAnonymous(user)) {
-        // 3a. Anonymous path: stream file to a temporary server-side GCS bucket,
+        // 3a. Anonymous path: stream the media file to a temporary server-side GCS bucket,
         // run Vertex AI, then the server cleans up the staged object.
-        const aiAnalysisPromise = generateLectureContentFromUpload(file, (msg) => setProgressMsg(msg));
+        const aiAnalysisPromise = generateLectureContentFromUpload(processingFile, (msg) => setProgressMsg(msg), { originalIsVideo: fileIsVideo });
 
         const result = await aiAnalysisPromise;
         cleanMarkdown = result.markdown;
@@ -91,8 +118,8 @@ export function useAudioUpload({ user, canGenerate, incrementGeneration } = {}) 
       } else {
         // 3b. Logged-in path: upload media to Firebase Storage and obtain the gs:// URI
         // required by the server-side Vertex AI endpoint.
-        const cloudUploadPromise = saved?.id && file
-          ? uploadMediaToCloud(file, saved.id, (msg) => {
+        const cloudUploadPromise = saved?.id && processingFile
+          ? uploadMediaToCloud(processingFile, saved.id, (msg) => {
               setCloudUploadProgress(msg);
             }, user)
           : Promise.resolve(null);
@@ -116,8 +143,9 @@ export function useAudioUpload({ user, canGenerate, incrementGeneration } = {}) 
           );
         }
 
-        const aiAnalysisPromise = generateLectureContent(file, (msg) => setProgressMsg(msg), {
+        const aiAnalysisPromise = generateLectureContent(processingFile, (msg) => setProgressMsg(msg), {
           gsUri,
+          originalIsVideo: fileIsVideo,
         });
 
         const result = await aiAnalysisPromise;

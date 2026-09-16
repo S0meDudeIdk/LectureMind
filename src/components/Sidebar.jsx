@@ -106,7 +106,7 @@ export default function Sidebar({
       </div>
 
       {/* List */}
-      <div className="flex-1 overflow-y-auto p-2.5 space-y-1">
+      <div className="flex-1 overflow-y-auto px-2.5 pt-1.5 pb-2.5 space-y-1">
         <div
           className="flex items-center justify-between text-[10px] font-semibold uppercase tracking-wider mb-2 px-1"
           style={{ color: 'var(--color-text-muted)' }}
