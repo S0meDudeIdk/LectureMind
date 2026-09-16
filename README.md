@@ -15,11 +15,12 @@
 - **🎙️ Multi-Format Media Ingestion**:
   - Supports audio (`.mp3`, `.wav`, `.m4a`, `.aac`, `.ogg`) and video (`.mp4`, `.webm`, `.mov`).
   - Dual-mode upload: fast inline processing for media under 20MB, and Firebase Cloud Storage (`gs://`) references for large recordings processed via Vertex AI.
-  - Built-in audio extraction and compressor pipeline for video files.
+  - Browser-side FFmpeg audio extraction for video files.
 
-- **🗺️ Interactive D3 / Markmap Mindmaps**:
-  - Dynamic hierarchical visual tree diagrams powered by Markmap and D3.
-  - Expand/collapse branches, zoom, pan, and search node structures.
+- **🗺️ Interactive Mindmaps**:
+  - Hierarchical left/right tree renderer powered by `simple-mind-map`.
+  - Rich KaTeX math support with custom math-aware node sizing and centered text.
+  - Expand/collapse branches, zoom, pan, and fit-to-view controls.
   - Bi-directional sync between the live editor and the mindmap canvas.
 
 - **📝 Obsidian-Style Live Preview Editor**:
@@ -41,8 +42,8 @@
   - Automatic authorized domain helper for Google Cloud Run / AI Studio preview environments.
 
 - **📤 Multi-Format Exporting**:
-  - Export mindmap diagrams as high-resolution **PNG** or vector **SVG**.
-  - Export study notes as styled **PDF**, clean **Markdown (.md)**, or **Word (.doc)** documents.
+  - Export mindmap diagrams as **JPG** or **PDF** via the `simple-mind-map` Export plugin.
+  - Export study notes as clean **Markdown (.md)** or rich **Google Docs** (direct Drive upload or clipboard fallback).
 
 ---
 
@@ -51,11 +52,12 @@
 - **Frontend**: [React 19](https://react.dev/), [Vite](https://vitejs.dev/)
 - **Styling**: [Tailwind CSS v4](https://tailwindcss.com/)
 - **AI Model**: [Google Gemini via Vertex AI / Gemini Enterprise Agent Platform (`@google/genai`)](https://cloud.google.com/gemini-enterprise-agent-platform)
-- **Mindmap Engine**: [`markmap-lib`](https://markmap.js.org/), [`markmap-view`](https://markmap.js.org/), and [D3.js](https://d3js.org/)
+- **Mindmap Engine**: [`simple-mind-map`](https://github.com/wanglin2/mind-map) with [`katex`](https://katex.org/) math rendering
 - **Editor & Formatting**: [CodeMirror 6](https://codemirror.net/), [KaTeX](https://katex.org/), [Marked](https://marked.js.org/)
 - **Icons**: [@phosphor-icons/react](https://phosphoricons.com/)
 - **Backend & Persistence**: [Firebase (Firestore, Storage, Authentication)](https://firebase.google.com/)
-- **Export Utilities**: `jspdf`, `html2canvas`, `modern-screenshot`
+- **Audio Extraction**: [`@ffmpeg/ffmpeg`](https://ffmpegwasm.netlify.app/) in the browser
+- **Export Utilities**: `simple-mind-map` Export plugin, `html2canvas`, Google Drive REST API
 
 ---
 
