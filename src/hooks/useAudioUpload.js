@@ -105,20 +105,52 @@ export function useAudioUpload({ user, canGenerate, incrementGeneration } = {}) 
       let transcriptChunks = [];
 
       if (isAnonymous(user)) {
-        // 3a. Anonymous path: stream the media file to a temporary server-side GCS bucket,
-        // run Vertex AI, then the server cleans up the staged object.
-        const aiAnalysisPromise = generateLectureContentFromUpload(processingFile, (msg) => setProgressMsg(msg), { originalIsVideo: fileIsVideo });
+        // 3a. Anonymous path: upload to temporary cloud storage via signed URL,
+        // analyze with Vertex AI, and clean up temporary storage object.
+        let cloudUploadResult = null;
+        try {
+          cloudUploadResult = await uploadMediaToCloud(processingFile, 'anon-' + Date.now(), (msg) => {
+            setCloudUploadProgress(msg);
+          }, user);
+        } catch (storageErr) {
+          console.warn('[useAudioUpload] Anonymous cloud upload notice:', storageErr);
+        } finally {
+          setCloudUploadProgress(null);
+        }
 
-        const result = await aiAnalysisPromise;
-        cleanMarkdown = result.markdown;
-        cleanNotes = result.notes || result.markdown;
-        transcriptChunks = result.transcript || [];
+        if (cloudUploadResult?.gsUri) {
+          const aiAnalysisPromise = generateLectureContent(processingFile, (msg) => setProgressMsg(msg), {
+            gsUri: cloudUploadResult.gsUri,
+            originalIsVideo: fileIsVideo,
+          });
+
+          const result = await aiAnalysisPromise;
+          cleanMarkdown = result.markdown;
+          cleanNotes = result.notes || result.markdown;
+          transcriptChunks = result.transcript || [];
+
+          // Clean up staged temporary media in background
+          fetch('/api/delete-media', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ gsUri: cloudUploadResult.gsUri }),
+          }).catch(() => {});
+        } else {
+          // Fallback to upload endpoint
+          const aiAnalysisPromise = generateLectureContentFromUpload(processingFile, (msg) => setProgressMsg(msg), {
+            originalIsVideo: fileIsVideo,
+          });
+
+          const result = await aiAnalysisPromise;
+          cleanMarkdown = result.markdown;
+          cleanNotes = result.notes || result.markdown;
+          transcriptChunks = result.transcript || [];
+        }
 
         incrementGeneration?.();
       } else {
-        // 3b. Logged-in path: upload media to Firebase Storage and obtain the gs:// URI
-        // required by the server-side Vertex AI endpoint. If Firebase Storage fails or is blocked,
-        // fall back seamlessly to generateLectureContentFromUpload.
+        // 3b. Logged-in path: upload media to Cloud Storage via signed URL and obtain the gs:// URI
+        // required by the server-side Vertex AI endpoint. If direct storage fails, fall back to chunked or server upload.
         let cloudUploadResult = null;
         try {
           const cloudUploadPromise = saved?.id && processingFile
@@ -137,11 +169,13 @@ export function useAudioUpload({ user, canGenerate, incrementGeneration } = {}) 
         if (cloudUploadResult?.gsUri) {
           const { downloadUrl, gsUri } = cloudUploadResult;
 
-          setAudioUrl(downloadUrl);
-          if (saved?.id) {
-            updateMindmap(saved.id, { audioUrl: downloadUrl }, user).catch((e) =>
-              console.warn('[Storage] Firestore cloud URL update failed:', e)
-            );
+          if (downloadUrl) {
+            setAudioUrl(downloadUrl);
+            if (saved?.id) {
+              updateMindmap(saved.id, { audioUrl: downloadUrl }, user).catch((e) =>
+                console.warn('[Storage] Firestore cloud URL update failed:', e)
+              );
+            }
           }
 
           const aiAnalysisPromise = generateLectureContent(processingFile, (msg) => setProgressMsg(msg), {

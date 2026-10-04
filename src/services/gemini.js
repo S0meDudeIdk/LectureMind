@@ -1,4 +1,5 @@
 import { getMediaDuration } from './mediaProcessor';
+import { uploadMediaToCloud } from './storage';
 
 // Server-side model fallback list — the actual fallback loop now runs on the
 // /api/generate-lecture server endpoint. Kept here for reference and backwards
@@ -413,6 +414,47 @@ export const generateLectureContentFromUpload = async (rawFile, onProgress, opti
   const durationSec = await getMediaDuration(rawFile);
   const formattedDuration = formatDuration(durationSec);
   const promptText = buildPromptText(formattedDuration);
+
+  // 1. First attempt: stage the media via signed direct GCS upload or chunked upload.
+  // This bypasses Cloud Run's 32 MB HTTP request limit and allows files of any size (e.g. 50MB, 100MB+).
+  let stagedResult = null;
+  try {
+    stagedResult = await uploadMediaToCloud(rawFile, 'anon-' + Date.now(), onProgress, { uid: '' });
+  } catch (err) {
+    console.warn('[Gemini] Direct staging upload notice:', err?.message || err);
+  }
+
+  if (stagedResult?.gsUri) {
+    try {
+      const content = await generateLectureContent(rawFile, onProgress, {
+        gsUri: stagedResult.gsUri,
+        originalIsVideo: isVideo,
+      });
+
+      // Background cleanup of temporary staged media object
+      fetch('/api/delete-media', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ gsUri: stagedResult.gsUri }),
+      }).catch(() => {});
+
+      return content;
+    } catch (genErr) {
+      fetch('/api/delete-media', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ gsUri: stagedResult.gsUri }),
+      }).catch(() => {});
+      throw genErr;
+    }
+  }
+
+  // 2. If direct staging failed, check size: files > 25MB cannot be sent via single POST without triggering Cloud Run 413
+  if (rawFile.size > 25 * 1024 * 1024) {
+    throw new Error(
+      `Media file (${(rawFile.size / 1024 / 1024).toFixed(1)} MB) exceeds direct upload limits. Please verify cloud storage connectivity and retry.`
+    );
+  }
 
   const formData = new FormData();
   formData.append('file', rawFile);

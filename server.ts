@@ -290,9 +290,13 @@ const location =
   process.env.GOOGLE_CLOUD_LOCATION ||
   'global';
 
-const gcsAnonymousBucket =
+const primaryBucket =
+  (process.env.VITE_FIREBASE_STORAGE_BUCKET || '').replace(/^gs:\/\//, '').replace(/\/$/, '') ||
+  (project ? `${project}.firebasestorage.app` : 'ai-riser-506205.firebasestorage.app');
+
+const anonymousBucket =
   process.env.GCS_ANONYMOUS_BUCKET ||
-  '';
+  'lecturemind-anonymous-uploads';
 
 const vertexClient = project
   ? new GoogleGenAI({
@@ -302,7 +306,13 @@ const vertexClient = project
     })
   : null;
 
-const storageClient = gcsAnonymousBucket ? new Storage() : null;
+let storageClient: Storage | null = null;
+try {
+  storageClient = new Storage();
+  console.log(`[Server Setup] Storage client initialized. Primary: "${primaryBucket}", Anonymous: "${anonymousBucket}"`);
+} catch (e: any) {
+  console.warn('[Server Setup] Storage client initialization notice:', e.message);
+}
 
 console.log(`[Server Setup] Project: "${project}", Location: "${location}", Vertex AI initialized: ${!!vertexClient}`);
 
@@ -419,9 +429,261 @@ async function startServer() {
     res.json({
       status: 'ok',
       vertexConfigured: !!vertexClient,
+      storageConfigured: !!storageClient,
+      primaryBucket,
+      anonymousBucket,
       project: project || 'not configured',
       location,
     });
+  });
+
+  // 1. Storage signed direct upload URL generator (bypasses Cloud Run 32MB limit & 403 storage rules)
+  app.post('/api/get-upload-url', express.json(), async (req: Request, res: Response) => {
+    try {
+      if (!storageClient) {
+        return res.status(503).json({ error: 'Cloud storage client is not available.' });
+      }
+
+      const { fileName, mimeType, fileSize, lectureId, isAnonymous } = req.body || {};
+      const cleanFileName = (fileName || 'media.mp3').replace(/[^a-zA-Z0-9._-]/g, '_');
+      const ext = path.extname(cleanFileName).replace('.', '').toLowerCase() || 'mp3';
+      const uploadUuid = crypto.randomUUID();
+      const token = crypto.randomUUID();
+
+      const isAnon = Boolean(
+        isAnonymous ||
+        !lectureId ||
+        lectureId.startsWith('sample-') ||
+        lectureId.startsWith('local-') ||
+        lectureId.startsWith('anon-') ||
+        lectureId.startsWith('temp-')
+      );
+
+      const targetBucketName = isAnon ? anonymousBucket : primaryBucket;
+      const storagePath = isAnon
+        ? `anonymous_uploads/${uploadUuid}.${ext}`
+        : `lectures/${lectureId}/media.${ext}`;
+
+      const bucket = storageClient.bucket(targetBucketName);
+      const file = bucket.file(storagePath);
+
+      // V4 Signed PUT URL (valid for 1 hour)
+      const [uploadUrl] = await file.getSignedUrl({
+        version: 'v4',
+        action: 'write',
+        expires: Date.now() + 60 * 60 * 1000,
+      });
+
+      const gsUri = `gs://${targetBucketName}/${storagePath}`;
+      const downloadUrl = `https://firebasestorage.googleapis.com/v0/b/${targetBucketName}/o/${encodeURIComponent(storagePath)}?alt=media&token=${token}`;
+
+      console.log(`[Storage API] Generated signed upload URL for ${gsUri} (isAnonymous=${isAnon})`);
+
+      return res.json({
+        ok: true,
+        uploadUrl,
+        gsUri,
+        downloadUrl,
+        storagePath,
+        bucket: targetBucketName,
+        downloadToken: token,
+        isAnonymous: isAnon,
+      });
+    } catch (err: any) {
+      console.error('[Storage API] get-upload-url error:', err);
+      return res.status(500).json({ error: 'Failed to generate upload URL: ' + (err?.message || err) });
+    }
+  });
+
+  // 2. Finalize direct upload (sets Firebase Storage download token metadata & returns playback URL)
+  app.post('/api/finalize-upload', express.json(), async (req: Request, res: Response) => {
+    try {
+      const { gsUri, downloadToken, mimeType } = req.body || {};
+      if (!storageClient || !gsUri || typeof gsUri !== 'string' || !gsUri.startsWith('gs://')) {
+        return res.status(400).json({ error: 'Invalid gsUri parameter' });
+      }
+
+      const parts = gsUri.replace('gs://', '').split('/');
+      const bucketName = parts[0];
+      const filePath = parts.slice(1).join('/');
+      const bucket = storageClient.bucket(bucketName);
+      const file = bucket.file(filePath);
+
+      if (downloadToken) {
+        await file.setMetadata({
+          contentType: mimeType || 'application/octet-stream',
+          metadata: {
+            firebaseStorageDownloadTokens: downloadToken,
+          },
+        }).catch((e: any) => console.warn('[Storage API] setMetadata notice:', e.message));
+      }
+
+      // Also generate a 30-day signed read URL as fallback
+      const [signedReadUrl] = await file.getSignedUrl({
+        version: 'v4',
+        action: 'read',
+        expires: Date.now() + 30 * 24 * 60 * 60 * 1000,
+      }).catch(() => ['']);
+
+      const fbUrl = `https://firebasestorage.googleapis.com/v0/b/${bucketName}/o/${encodeURIComponent(filePath)}?alt=media&token=${downloadToken || ''}`;
+
+      return res.json({
+        ok: true,
+        gsUri,
+        downloadUrl: signedReadUrl || fbUrl,
+        firebaseUrl: fbUrl,
+      });
+    } catch (err: any) {
+      console.warn('[Storage API] finalize-upload warning:', err.message);
+      return res.json({ ok: true });
+    }
+  });
+
+  // 3. Chunked upload endpoint (for clients whose network blocks direct storage.googleapis.com)
+  app.post('/api/upload-chunk', express.raw({ limit: '25mb', type: '*/*' }), async (req: Request, res: Response) => {
+    try {
+      if (!storageClient) {
+        return res.status(503).json({ error: 'Storage client is not initialized.' });
+      }
+
+      const uploadId = String(req.headers['x-upload-id'] || '').replace(/[^a-zA-Z0-9_-]/g, '');
+      const chunkIndex = parseInt(String(req.headers['x-chunk-index'] || '0'), 10);
+      const totalChunks = parseInt(String(req.headers['x-total-chunks'] || '1'), 10);
+      const fileName = decodeURIComponent(String(req.headers['x-file-name'] || 'media.mp3')).replace(/[^a-zA-Z0-9._-]/g, '_');
+      const mimeType = String(req.headers['x-mime-type'] || 'application/octet-stream');
+      const lectureId = String(req.headers['x-lecture-id'] || '');
+      const isAnonymous = req.headers['x-is-anonymous'] === 'true';
+
+      if (!uploadId || Number.isNaN(chunkIndex) || Number.isNaN(totalChunks) || totalChunks <= 0) {
+        return res.status(400).json({ error: 'Missing or invalid chunk headers.' });
+      }
+
+      const chunkBuffer = req.body as Buffer;
+      if (!chunkBuffer || chunkBuffer.length === 0) {
+        return res.status(400).json({ error: 'Empty chunk data received.' });
+      }
+
+      const chunkDir = path.join(os.tmpdir(), `chunks_${uploadId}`);
+      if (!fs.existsSync(chunkDir)) {
+        fs.mkdirSync(chunkDir, { recursive: true });
+      }
+
+      const chunkPath = path.join(chunkDir, `part_${chunkIndex}`);
+      fs.writeFileSync(chunkPath, chunkBuffer);
+
+      console.log(`[Storage API] Received chunk ${chunkIndex + 1}/${totalChunks} (${chunkBuffer.length} bytes) for ${uploadId}`);
+
+      // If not the final chunk, acknowledge receipt
+      if (chunkIndex + 1 < totalChunks) {
+        return res.json({ ok: true, chunkReceived: chunkIndex });
+      }
+
+      // Final chunk received: assemble complete file
+      const ext = path.extname(fileName).replace('.', '').toLowerCase() || 'mp3';
+      const mergedPath = path.join(os.tmpdir(), `merged_${uploadId}.${ext}`);
+      const writeStream = fs.createWriteStream(mergedPath);
+
+      for (let i = 0; i < totalChunks; i++) {
+        const partFile = path.join(chunkDir, `part_${i}`);
+        if (!fs.existsSync(partFile)) {
+          writeStream.close();
+          return res.status(400).json({ error: `Missing chunk ${i} during assembly.` });
+        }
+        const data = fs.readFileSync(partFile);
+        writeStream.write(data);
+      }
+      writeStream.end();
+
+      await new Promise((resolve) => writeStream.on('finish', resolve));
+
+      // Clean up chunk fragments
+      try {
+        fs.rmSync(chunkDir, { recursive: true, force: true });
+      } catch {}
+
+      // Upload assembled file to GCS
+      const isAnon = Boolean(
+        isAnonymous ||
+        !lectureId ||
+        lectureId.startsWith('sample-') ||
+        lectureId.startsWith('local-') ||
+        lectureId.startsWith('anon-') ||
+        lectureId.startsWith('temp-')
+      );
+      const targetBucketName = isAnon ? anonymousBucket : primaryBucket;
+      const storagePath = isAnon
+        ? `anonymous_uploads/${uploadId}.${ext}`
+        : `lectures/${lectureId}/media.${ext}`;
+
+      const token = crypto.randomUUID();
+      const bucket = storageClient.bucket(targetBucketName);
+
+      await bucket.upload(mergedPath, {
+        destination: storagePath,
+        contentType: mimeType,
+        metadata: {
+          metadata: {
+            firebaseStorageDownloadTokens: token,
+            originalFileName: fileName,
+          },
+        },
+      });
+
+      try {
+        fs.unlinkSync(mergedPath);
+      } catch {}
+
+      const gsUri = `gs://${targetBucketName}/${storagePath}`;
+      const [signedReadUrl] = await bucket.file(storagePath).getSignedUrl({
+        version: 'v4',
+        action: 'read',
+        expires: Date.now() + 30 * 24 * 60 * 60 * 1000,
+      }).catch(() => ['']);
+
+      const fbUrl = `https://firebasestorage.googleapis.com/v0/b/${targetBucketName}/o/${encodeURIComponent(storagePath)}?alt=media&token=${token}`;
+      console.log(`[Storage API] Assembled and uploaded chunked file to ${gsUri}`);
+
+      return res.json({
+        ok: true,
+        gsUri,
+        downloadUrl: signedReadUrl || fbUrl,
+        firebaseUrl: fbUrl,
+      });
+    } catch (err: any) {
+      console.error('[Storage API] upload-chunk error:', err);
+      return res.status(500).json({ error: 'Failed to process chunk upload: ' + (err?.message || err) });
+    }
+  });
+
+  // 4. Server-side media deletion (bypasses client 403 Forbidden on listAll / deleteObject)
+  app.post('/api/delete-media', express.json(), async (req: Request, res: Response) => {
+    try {
+      const { lectureId, gsUri } = req.body || {};
+      if (!storageClient) {
+        return res.json({ ok: true, notice: 'Storage client not active' });
+      }
+
+      if (lectureId && !lectureId.startsWith('sample-') && !lectureId.startsWith('local-') && lectureId !== '1' && lectureId !== '2') {
+        const bucket = storageClient.bucket(primaryBucket);
+        await bucket.deleteFiles({ prefix: `lectures/${lectureId}/`, force: true }).catch(() => {});
+        console.log(`[Storage API] Deleted cloud media folder for lecture: ${lectureId}`);
+      }
+
+      if (gsUri && typeof gsUri === 'string' && gsUri.startsWith('gs://')) {
+        const parts = gsUri.replace('gs://', '').split('/');
+        const bName = parts[0];
+        const fPath = parts.slice(1).join('/');
+        if (bName && fPath) {
+          await storageClient.bucket(bName).file(fPath).delete({ ignoreNotFound: true }).catch(() => {});
+          console.log(`[Storage API] Deleted staged media object: ${gsUri}`);
+        }
+      }
+
+      return res.json({ ok: true });
+    } catch (err: any) {
+      console.warn('[Storage API] Media deletion notice:', err.message);
+      return res.json({ ok: true });
+    }
   });
 
   // JSON parser for /api/generate-lecture

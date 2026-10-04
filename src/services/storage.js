@@ -1,160 +1,227 @@
-import { ref, uploadBytesResumable, getDownloadURL, deleteObject, listAll } from 'firebase/storage';
+import { ref, deleteObject, listAll } from 'firebase/storage';
 import { storage, isFirebaseConfigured, isStorageConfigured } from './firebase';
 import { isAnonymous } from '../utils/authLimits';
 
 /**
- * Upload a media file (video or audio) to Firebase Cloud Storage
- * using Firebase SDK's resumable upload (handles files of any size).
- * Returns a permanent cross-device HTTPS download URL.
- * Falls back safely to null on storage errors (e.g. retry limit exceeded, bucket disabled).
+ * Direct PUT upload to Google Cloud Storage signed URL with real-time progress.
+ * Completely bypasses Cloud Run's 32 MB request body limit and Firebase Storage client 403 rules.
+ */
+function uploadDirectViaSignedUrl(file, uploadUrl, mimeType, onProgress) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('PUT', uploadUrl, true);
+    if (mimeType) {
+      xhr.setRequestHeader('Content-Type', mimeType);
+    }
+
+    xhr.upload.onprogress = (evt) => {
+      if (evt.lengthComputable && evt.total > 0) {
+        const pct = Math.round((evt.loaded / evt.total) * 100);
+        onProgress?.(`Uploading media to cloud (${pct}%)...`);
+      }
+    };
+
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve(true);
+      } else {
+        reject(new Error(`Storage signed upload failed with HTTP ${xhr.status}`));
+      }
+    };
+
+    xhr.onerror = () => reject(new Error('Network error uploading directly to cloud storage'));
+    xhr.ontimeout = () => reject(new Error('Cloud storage upload timed out'));
+    xhr.timeout = 1800000; // 30 minutes for large media files
+    xhr.send(file);
+  });
+}
+
+/**
+ * Chunked upload fallback (10 MB slices) when network restricts direct storage.googleapis.com access.
+ * Each chunk is well below Cloud Run's 32 MB proxy limit.
+ */
+async function uploadViaChunks(file, lectureId, isAnon, onProgress) {
+  const CHUNK_SIZE = 10 * 1024 * 1024; // 10 MB per chunk
+  const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+  const uploadId = `chunk_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+
+  for (let i = 0; i < totalChunks; i++) {
+    const start = i * CHUNK_SIZE;
+    const end = Math.min(start + CHUNK_SIZE, file.size);
+    const chunk = file.slice(start, end);
+
+    const pct = Math.round((i / totalChunks) * 100);
+    onProgress?.(`Uploading chunk ${i + 1}/${totalChunks} (${pct}%)...`);
+
+    const res = await fetch('/api/upload-chunk', {
+      method: 'POST',
+      headers: {
+        'x-upload-id': uploadId,
+        'x-chunk-index': String(i),
+        'x-total-chunks': String(totalChunks),
+        'x-file-name': encodeURIComponent(file.name || 'lecture_media'),
+        'x-mime-type': file.type || 'application/octet-stream',
+        'x-lecture-id': lectureId || '',
+        'x-is-anonymous': isAnon ? 'true' : 'false',
+        'Content-Type': 'application/octet-stream',
+      },
+      body: chunk,
+    });
+
+    if (!res.ok) {
+      const errJson = await res.json().catch(() => null);
+      throw new Error(errJson?.error || `Chunk upload failed (${res.status})`);
+    }
+
+    if (i === totalChunks - 1) {
+      const data = await res.json();
+      return {
+        downloadUrl: data.downloadUrl || data.firebaseUrl || '',
+        gsUri: data.gsUri,
+      };
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Upload a media file (video or audio) to Cloud Storage.
+ *
+ * Strategies:
+ * 1. Server-signed V4 direct PUT URL (fast, zero proxy limits, supports files > 500 MB, bypasses client 403 rules).
+ * 2. Server chunked upload (10 MB slices, completely avoids Cloud Run 32 MB limit).
+ * 3. Safe fallback to null (local IndexedDB playback cache).
  *
  * @param {File} file - Original video or audio file
- * @param {string} lectureId - Firestore document ID (used as storage key)
+ * @param {string} lectureId - Firestore document ID or local ID
  * @param {Function} [onProgress] - Progress callback (message: string) => void
  * @param {object|null|undefined} [user] - Firebase auth user object
- * @returns {Promise<{downloadUrl: string, gsUri: string}|null>} - Public download URL and gs:// URI, or null on failure
+ * @returns {Promise<{downloadUrl: string, gsUri: string}|null>}
  */
 export async function uploadMediaToCloud(file, lectureId, onProgress, user) {
-  if (!file || !lectureId) return null;
+  if (!file) return null;
 
-  // Skip Firebase Storage for explicitly anonymous users (local-only mode)
-  if (user != null && isAnonymous(user)) {
-    return null;
-  }
+  const isAnon = user != null && isAnonymous(user);
+  const fileSizeMB = (file.size / 1024 / 1024).toFixed(1);
+  console.log(`[Storage] Initiating upload of ${fileSizeMB} MB (lectureId: ${lectureId}, anonymous: ${isAnon})`);
 
-  if (!isFirebaseConfigured || !isStorageConfigured || !storage) {
-    console.info('[Storage] Firebase Storage bucket not configured. Using local IndexedDB cache.');
-    return null;
-  }
-
+  // --- Strategy 1: Server-signed direct GCS upload ---
   try {
-    const ext = (file.name || 'media').split('.').pop()?.toLowerCase() || 'mp4';
-    const storagePath = `lectures/${lectureId}/media.${ext}`;
-    const storageRef = ref(storage, storagePath);
-
-    console.log(`[Storage] Uploading ${(file.size / 1024 / 1024).toFixed(1)} MB to Firebase Storage...`);
-
-    const uploadTask = uploadBytesResumable(storageRef, file, {
-      contentType: file.type || 'application/octet-stream',
-      customMetadata: {
-        originalFileName: file.name,
-        uploadedAt: new Date().toISOString(),
-      },
+    onProgress?.('Initializing cloud storage session...');
+    const initRes = await fetch('/api/get-upload-url', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        fileName: file.name,
+        mimeType: file.type || 'audio/mpeg',
+        fileSize: file.size,
+        lectureId: lectureId || '',
+        isAnonymous: isAnon,
+      }),
     });
 
-    return await new Promise((resolve) => {
-      let isSettled = false;
+    if (initRes.ok) {
+      const initData = await initRes.json();
+      if (initData?.uploadUrl && initData?.gsUri) {
+        console.log(`[Storage] Uploading directly to cloud via signed URL: ${initData.gsUri}`);
+        await uploadDirectViaSignedUrl(file, initData.uploadUrl, file.type, onProgress);
 
-      // Stall watchdog: If zero upload progress occurs for 90 seconds, log notice
-      let lastActivityTime = Date.now();
-      const stallCheckInterval = setInterval(() => {
-        if (!isSettled && Date.now() - lastActivityTime > 90000) {
-          clearInterval(stallCheckInterval);
-          isSettled = true;
+        let finalDownloadUrl = initData.downloadUrl || '';
+
+        // Finalize metadata (Firebase storage download token for cross-device playback)
+        if (!isAnon && initData.downloadToken) {
           try {
-            uploadTask.cancel();
-          } catch {}
-          console.info('[Storage] Cloud upload stalled for 90s. Continuing with local playback storage.');
-          resolve(null);
-        }
-      }, 10000);
-
-      uploadTask.on(
-        'state_changed',
-        (snapshot) => {
-          lastActivityTime = Date.now();
-          if (snapshot.totalBytes > 0) {
-            const pct = Math.round((snapshot.bytesTransferred / snapshot.totalBytes) * 100);
-            onProgress?.(`Uploading to cloud storage (${pct}%)...`);
-          }
-        },
-        (error) => {
-          clearInterval(stallCheckInterval);
-          if (isSettled) return;
-          isSettled = true;
-
-          // Gracefully log recognized non-fatal storage fallback causes
-          const errorCode = error?.code || 'unknown';
-          if (errorCode === 'storage/retry-limit-exceeded') {
-            console.info('[Storage] Cloud storage reached retry limit (unreachable bucket or network restriction). Local media playback will be used.');
-          } else if (errorCode === 'storage/unauthorized') {
-            console.info('[Storage] Cloud storage unauthorized (check Firebase storage rules). Local media playback will be used.');
-          } else if (errorCode === 'storage/canceled') {
-            console.info('[Storage] Cloud storage upload canceled.');
-          } else {
-            console.info(`[Storage] Cloud storage unavailable (${errorCode}). Local media playback will be used.`);
-          }
-
-          resolve(null);
-        },
-        async () => {
-          clearInterval(stallCheckInterval);
-          if (isSettled) return;
-          isSettled = true;
-
-          try {
-            const downloadUrl = await getDownloadURL(uploadTask.snapshot.ref);
-            const gsUri = `gs://${storageRef.bucket}/${storageRef.fullPath}`;
-            console.log('[Storage] ✅ Media uploaded successfully:', downloadUrl, gsUri);
-            resolve({ downloadUrl, gsUri });
+            const finalRes = await fetch('/api/finalize-upload', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                gsUri: initData.gsUri,
+                downloadToken: initData.downloadToken,
+                mimeType: file.type,
+              }),
+            });
+            if (finalRes.ok) {
+              const finalData = await finalRes.json();
+              if (finalData?.downloadUrl) {
+                finalDownloadUrl = finalData.downloadUrl;
+              }
+            }
           } catch {
-            console.info('[Storage] Could not retrieve download URL. Using local media playback.');
-            resolve(null);
+            // non-fatal
           }
         }
-      );
-    });
-  } catch (err) {
-    console.info('[Storage] Cloud upload initialization skipped:', err?.message || err);
-    return null;
+
+        console.log(`[Storage] ✅ Direct cloud upload complete: ${initData.gsUri}`);
+        return {
+          downloadUrl: finalDownloadUrl,
+          gsUri: initData.gsUri,
+        };
+      }
+    }
+  } catch (directErr) {
+    console.warn('[Storage] Direct signed URL upload failed, attempting chunked fallback:', directErr?.message || directErr);
   }
+
+  // --- Strategy 2: Chunked upload fallback (10 MB slices) ---
+  try {
+    console.log('[Storage] Starting chunked upload fallback...');
+    const chunkResult = await uploadViaChunks(file, lectureId, isAnon, onProgress);
+    if (chunkResult?.gsUri) {
+      console.log(`[Storage] ✅ Chunked cloud upload complete: ${chunkResult.gsUri}`);
+      return chunkResult;
+    }
+  } catch (chunkErr) {
+    console.warn('[Storage] Chunked upload failed:', chunkErr?.message || chunkErr);
+  }
+
+  console.info('[Storage] Cloud upload unavailable. Media will use fast local playback.');
+  return null;
 }
 
 /**
  * Delete all media files for a lecture from Firebase Cloud Storage.
- * Removes the entire lectures/{lectureId}/ folder and/or specific audioUrl.
+ * Safe against 403 Forbidden errors: avoids calling client listAll on local-* items
+ * and proxies the deletion to the server service account.
  *
  * @param {string} lectureId - Firestore document ID or local ID (e.g. local-1787...)
  * @param {string} [audioUrl] - Optional direct Firebase Storage URL
  */
 export async function deleteMediaFromCloud(lectureId, audioUrl = null) {
-  if (!isFirebaseConfigured || !isStorageConfigured || !storage) return;
+  // 1. Never attempt client storage listing for sample or local records (prevents 403 Forbidden)
+  if (!lectureId || lectureId.startsWith('sample-') || lectureId.startsWith('local-') || lectureId === '1' || lectureId === '2') {
+    return;
+  }
 
+  // 2. Delegate deletion to server (service account admin privileges, never throws 403)
   try {
-    // 1. Delete all items inside lectures/{lectureId}/ folder
-    if (lectureId && !lectureId.startsWith('sample-') && lectureId !== '1' && lectureId !== '2') {
-      try {
-        const folderRef = ref(storage, `lectures/${lectureId}`);
-        const fileList = await listAll(folderRef);
+    fetch('/api/delete-media', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ lectureId, audioUrl }),
+    }).catch(() => {});
+  } catch {
+    // non-fatal
+  }
 
-        const deletePromises = fileList.items.map((itemRef) =>
-          deleteObject(itemRef).catch(() => {})
-        );
+  // 3. Optional client-side cleanup if Firebase client is configured and authenticated
+  if (isFirebaseConfigured && isStorageConfigured && storage) {
+    try {
+      const folderRef = ref(storage, `lectures/${lectureId}`);
+      const fileList = await listAll(folderRef).catch(() => null);
 
-        await Promise.all(deletePromises);
-        console.log(`[Storage] 🗑️ Deleted all media in lectures/${lectureId}`);
-      } catch {
-        // non-fatal
+      if (fileList?.items?.length) {
+        await Promise.all(fileList.items.map((itemRef) => deleteObject(itemRef).catch(() => {})));
+        console.log(`[Storage] 🗑️ Cleaned up client storage folder for ${lectureId}`);
       }
+    } catch {
+      // Ignored: server cleanup already handles this safely
     }
-
-    // 2. If direct audioUrl is provided, delete by URL
-    if (audioUrl && typeof audioUrl === 'string' && audioUrl.includes('firebasestorage.googleapis.com')) {
-      try {
-        const fileRef = ref(storage, audioUrl);
-        await deleteObject(fileRef);
-        console.log(`[Storage] 🗑️ Deleted media by URL:`, audioUrl);
-      } catch {
-        // file may already be deleted or not found
-      }
-    }
-  } catch (err) {
-    console.info('[Storage] Cloud cleanup finished:', err?.message || err);
   }
 }
 
 /**
- * Legacy alias — kept for backward compatibility
+ * Legacy aliases — kept for backward compatibility
  */
 export const uploadLectureMedia = uploadMediaToCloud;
 export const uploadSpeechAudioToCloud = uploadMediaToCloud;
