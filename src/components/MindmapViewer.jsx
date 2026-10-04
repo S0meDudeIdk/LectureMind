@@ -1,6 +1,7 @@
 import { useEffect, useRef, useCallback } from 'react';
 import MindMap from 'simple-mind-map';
 import Export from 'simple-mind-map/src/plugins/Export.js';
+import ExportPDF from 'simple-mind-map/src/plugins/ExportPDF.js';
 import { getNodeRichTextStyles, addXmlns } from 'simple-mind-map/src/utils/index.js';
 import katex from 'katex';
 import { transformToSimpleMindMap } from '../utils/markdown-to-simple-mind-map';
@@ -9,6 +10,7 @@ import { Plus, Minus, ArrowsOut } from '@phosphor-icons/react';
 
 const registerExportPlugin = MindMap.usePlugin.bind(MindMap);
 registerExportPlugin(Export);
+registerExportPlugin(ExportPDF);
 
 const isDark = () => !document.documentElement.classList.contains('light');
 
@@ -136,6 +138,9 @@ export default function MindmapViewer({ markdown }) {
           wrapper.innerHTML = `<div>${text}</div>`;
           const el = wrapper.children[0];
           el.classList.add('smm-richtext-node-wrap');
+          // Export recolors the SVG clone using the same palette as the live nodes.
+          el.dataset.branchColor = node.getData('branchColor');
+          el.dataset.depth = String(node.layerIndex);
 
           const styles = getNodeRichTextStyles(node);
           Object.entries(styles).forEach(([prop, value]) => {

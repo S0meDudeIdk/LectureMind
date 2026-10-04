@@ -35,7 +35,7 @@ export default function Header({
   activeTab, setActiveTab, hasContent,
   sidebarOpen, onToggleSidebar,
   onExportMd, onExportDocs,
-  onExportMindmapJpg, onExportMindmapPdf,
+  onExportMindmapJpg, onExportMindmapPng, onExportMindmapPdf,
 }) {
   const { theme, toggle } = useTheme();
   const { user, signInWithGoogle, signOut, isConfigured: _isConfigured } = useAuth();
@@ -44,6 +44,26 @@ export default function Header({
   const [accountOpen, setAccountOpen] = useState(false);
   const [authLoading, setAuthLoading] = useState(false);
   const [authError, setAuthError] = useState(null);
+  // Mindmap export options
+  const [mmExportTheme, setMmExportTheme] = useState('auto'); // 'auto' | 'light' | 'dark'
+  const [mmExportTransparent, setMmExportTransparent] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
+  const [exportError, setExportError] = useState(null);
+
+  const handleMindmapExport = async (handler) => {
+    if (isExporting) return;
+    setIsExporting(true);
+    setExportError(null);
+    try {
+      await handler({ theme: mmExportTheme, transparent: mmExportTransparent });
+      setExportOpen(false);
+    } catch (error) {
+      setExportError(error.message || 'Could not export mindmap. Please try again.');
+      setExportOpen(true);
+    } finally {
+      setIsExporting(false);
+    }
+  };
   const [nudgeDismissed, setNudgeDismissed] = useState(() => {
     try {
       return localStorage.getItem('lecturemind_auth_nudge_dismissed') === 'true';
@@ -240,9 +260,11 @@ export default function Header({
                 if (!exportOpen) e.currentTarget.style.backgroundColor = 'var(--color-surface-alt)';
               }}
               title="Export mindmap or notes"
+              aria-expanded={exportOpen}
+              aria-busy={isExporting}
             >
               <Export size={13} weight="bold" />
-              <span>Export</span>
+              <span>{isExporting ? 'Exporting…' : 'Export'}</span>
             </button>
 
             {exportOpen && (
@@ -287,26 +309,55 @@ export default function Header({
                   <TreeStructure size={12} className="text-indigo-400" />
                   <span>Mindmap</span>
                 </div>
-                <button
-                  onClick={() => { onExportMindmapJpg?.(); setExportOpen(false); }}
-                  className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs rounded-lg transition-colors text-left cursor-pointer"
-                  style={{ color: 'var(--color-text)' }}
-                  onMouseEnter={e => e.currentTarget.style.backgroundColor = 'var(--color-surface-overlay)'}
-                  onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'}
-                >
-                  <ImageIcon size={14} className="text-emerald-500" />
-                  <span>Download as Image (.jpg)</span>
-                </button>
-                <button
-                  onClick={() => { onExportMindmapPdf?.(); setExportOpen(false); }}
-                  className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs rounded-lg transition-colors text-left cursor-pointer"
-                  style={{ color: 'var(--color-text)' }}
-                  onMouseEnter={e => e.currentTarget.style.backgroundColor = 'var(--color-surface-overlay)'}
-                  onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'}
-                >
-                  <FilePdf size={14} className="text-rose-500" />
-                  <span>Download as PDF (.pdf)</span>
-                </button>
+
+                {/* Export options */}
+                <fieldset disabled={isExporting} aria-label="Mindmap export options" className="mx-1.5 mb-1 px-2.5 py-2 rounded-lg flex flex-col gap-2 disabled:opacity-60" style={{ backgroundColor: 'var(--color-surface-overlay)', border: '1px solid var(--color-border)' }}>
+                  {/* Theme row */}
+                  <div className="flex items-center justify-between gap-2">
+                    <span style={{ color: 'var(--color-text-muted)' }} className="text-[11px]">Theme</span>
+                    <div className="flex rounded-md overflow-hidden" style={{ border: '1px solid var(--color-border)' }}>
+                      {['auto', 'light', 'dark'].map(t => (
+                        <button
+                          key={t}
+                          type="button"
+                          aria-pressed={mmExportTheme === t}
+                          onClick={() => setMmExportTheme(t)}
+                          className="px-2 py-0.5 text-[10px] capitalize cursor-pointer transition-colors"
+                          style={{
+                            backgroundColor: mmExportTheme === t ? '#6366F1' : 'transparent',
+                            color: mmExportTheme === t ? '#fff' : 'var(--color-text-muted)',
+                          }}
+                        >{t}</button>
+                      ))}
+                    </div>
+                  </div>
+                  {/* Transparent bg row */}
+                  <label className="flex items-center justify-between gap-2 text-[11px]" style={{ color: 'var(--color-text-muted)' }}>
+                    <span>Transparent background</span>
+                    <input type="checkbox" checked={mmExportTransparent} onChange={e => setMmExportTransparent(e.target.checked)} className="accent-indigo-500 cursor-pointer" aria-describedby="mindmap-transparency-help" />
+                  </label>
+                  <p id="mindmap-transparency-help" className="text-[10px]" style={{ color: 'var(--color-text-muted)' }}>PNG and PDF only. JPG includes a background.</p>
+                </fieldset>
+
+                {[
+                  ['jpg', onExportMindmapJpg, ImageIcon],
+                  ['png', onExportMindmapPng, ImageIcon],
+                  ['pdf', onExportMindmapPdf, FilePdf],
+                ].map(([format, handler, Icon]) => (
+                  <button
+                    key={format}
+                    disabled={isExporting}
+                    onClick={() => handleMindmapExport(handler)}
+                    className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs rounded-lg transition-colors text-left cursor-pointer disabled:opacity-50 disabled:cursor-wait"
+                    style={{ color: 'var(--color-text)' }}
+                    onMouseEnter={e => e.currentTarget.style.backgroundColor = 'var(--color-surface-overlay)'}
+                    onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'}
+                  >
+                    <Icon size={14} className={format === 'pdf' ? 'text-rose-500' : 'text-emerald-500'} />
+                    <span>Download as {format.toUpperCase()} (.{format})</span>
+                  </button>
+                ))}
+                {exportError && <p role="alert" className="px-2.5 py-2 text-xs text-red-500">{exportError}</p>}
               </div>
             )}
           </div>

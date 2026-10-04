@@ -42,7 +42,7 @@
   - Automatic authorized domain helper for Google Cloud Run / AI Studio preview environments.
 
 - **📤 Multi-Format Exporting**:
-  - Export mindmap diagrams as **JPG** or **PDF** via the `simple-mind-map` Export plugin.
+  - Export mindmap diagrams as **JPG**, **PNG**, or **PDF** via the `simple-mind-map` Export plugin. Choose light, dark, or current theme; PNG and PDF support transparent backgrounds.
   - Export study notes as clean **Markdown (.md)** or rich **Google Docs** (direct Drive upload or clipboard fallback).
 
 ---

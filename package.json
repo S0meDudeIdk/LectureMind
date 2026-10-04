@@ -50,6 +50,8 @@
   },
   "allowScripts": {
     "@firebase/util@1.15.3": true,
-    "protobufjs@7.6.5": true
+    "protobufjs@7.6.5": true,
+    "@google/genai@2.21.0": true,
+    "esbuild@0.28.2": true
   }
 }

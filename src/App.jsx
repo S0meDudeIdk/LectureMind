@@ -16,8 +16,7 @@ import { useAuth } from './services/auth.js';
 import { getMediaFromLocalDb } from './services/mediaDb';
 import { updateMindmap } from './services/db';
 import { 
-  exportMindmapAsJpg, 
-  exportMindmapAsPdf, 
+  exportMindmapAsImage,
   exportMarkdownFile 
 } from './utils/exportUtils';
 
@@ -164,12 +163,16 @@ export default function App() {
     setIsDocsModalOpen(true);
   };
 
-  const handleExportMindmapJpg = () => {
-    exportMindmapAsJpg(activeTitle || 'lecture-mindmap', activeMarkdown);
+  const handleExportMindmapJpg = (opts) => {
+    return exportMindmapAsImage(activeTitle || 'lecture-mindmap', 'jpg', opts);
   };
 
-  const handleExportMindmapPdf = () => {
-    exportMindmapAsPdf(activeTitle || 'lecture-mindmap', activeMarkdown);
+  const handleExportMindmapPng = (opts) => {
+    return exportMindmapAsImage(activeTitle || 'lecture-mindmap', 'png', opts);
+  };
+
+  const handleExportMindmapPdf = (opts) => {
+    return exportMindmapAsImage(activeTitle || 'lecture-mindmap', 'pdf', opts);
   };
 
   const sidebar = (
@@ -191,6 +194,7 @@ export default function App() {
       onExportMd={handleExportMd}
       onExportDocs={handleExportDocs}
       onExportMindmapJpg={handleExportMindmapJpg}
+      onExportMindmapPng={handleExportMindmapPng}
       onExportMindmapPdf={handleExportMindmapPdf}
     >
       {/* ── Empty state ── */}

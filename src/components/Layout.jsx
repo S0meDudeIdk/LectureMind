@@ -4,7 +4,7 @@ import { SidebarProvider } from '../context/SidebarContext';
 
 export default function Layout({ 
   sidebar, children, activeTab, setActiveTab, hasContent, 
-  onExportMd, onExportDocs, onExportMindmapJpg, onExportMindmapPdf 
+  onExportMd, onExportDocs, onExportMindmapJpg, onExportMindmapPng, onExportMindmapPdf
 }) {
   const [sidebarOpen, setSidebarOpen] = useState(true);
 
@@ -22,6 +22,7 @@ export default function Layout({
         onExportMd={onExportMd}
         onExportDocs={onExportDocs}
         onExportMindmapJpg={onExportMindmapJpg}
+        onExportMindmapPng={onExportMindmapPng}
         onExportMindmapPdf={onExportMindmapPdf}
       />
 

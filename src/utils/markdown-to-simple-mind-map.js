@@ -73,12 +73,18 @@ function isDark() {
   return !document.documentElement.classList.contains('light');
 }
 
-function deriveColor(baseHex, depth) {
+export function getMindmapNodeColors(baseHex, depth, dark) {
+  if (depth === 0) {
+    return {
+      bg: dark ? 'rgba(130, 130, 190, 0.9)' : 'rgba(200, 195, 255, 0.9)',
+      text: dark ? '#ffffff' : '#1e1b4b',
+      border: dark ? 'rgba(180,170,240,0.7)' : 'rgba(80,70,180,0.5)',
+    };
+  }
   const hsl = d3.hsl(baseHex);
   hsl.l = Math.min(0.92, hsl.l + depth * 0.06);
   hsl.s = Math.max(0.35, hsl.s - depth * 0.04);
 
-  const dark = isDark();
   // Dark mode: stronger, slightly lighter backgrounds so white text pops.
   // Light mode: soft pastel translucent backgrounds with dark text.
   const bgLightness = dark
@@ -104,10 +110,10 @@ function getNodeWeight(node) {
   return count;
 }
 
-function buildSimpleNode(node, baseHex, depth) {
-  const { bg, border, text } = deriveColor(baseHex, depth);
+function buildSimpleNode(node, baseHex, depth, dark) {
+  const { bg, border, text } = getMindmapNodeColors(baseHex, depth, dark);
   const children = (node.children || []).map((child) =>
-    buildSimpleNode(child, baseHex, depth + 1)
+    buildSimpleNode(child, baseHex, depth + 1, dark)
   );
 
   const rawText = cleanRichText(node.content) || htmlToText(node.content);
@@ -129,8 +135,7 @@ function buildSimpleNode(node, baseHex, depth) {
   return { data, children };
 }
 
-function buildRootNode(initialNode) {
-  const dark = isDark();
+function buildRootNode(initialNode, dark) {
 
   let current = initialNode;
   const titleParts = [];
@@ -200,7 +205,7 @@ function buildRootNode(initialNode) {
   const children = rawChildren.map((child, index) => {
     const direction = directions[index] || (index % 2 === 0 ? 'right' : 'left');
     const color = BRANCH_PALETTE[index % BRANCH_PALETTE.length];
-    const branch = buildSimpleNode(child, color, 1);
+    const branch = buildSimpleNode(child, color, 1, dark);
     branch.data.dir = direction;
     return branch;
   });
@@ -218,12 +223,13 @@ function buildRootNode(initialNode) {
     rootDisplayText = `<div style="font-weight:700;font-size:1.06em;line-height:1.3;">${mainTitle}</div><div style="font-weight:500;font-size:0.84em;opacity:0.85;margin-top:3px;line-height:1.25;">${subTitle}</div>`;
   }
 
+  const rootColors = getMindmapNodeColors(null, 0, dark);
   const rootData = {
     text: rootDisplayText,
     richText: true,
-    fillColor: dark ? 'rgba(130, 130, 190, 0.9)' : 'rgba(200, 195, 255, 0.9)',
-    color: dark ? '#ffffff' : '#1e1b4b',
-    borderColor: dark ? 'rgba(180,170,240,0.7)' : 'rgba(80,70,180,0.5)',
+    fillColor: rootColors.bg,
+    color: rootColors.text,
+    borderColor: rootColors.border,
     borderWidth: 1,
     borderRadius: 10,
     shape: 'roundedRectangle',
@@ -235,9 +241,9 @@ function buildRootNode(initialNode) {
   return { data: rootData, children };
 }
 
-export function transformToSimpleMindMap(markdown) {
+export function transformToSimpleMindMap(markdown, dark = isDark()) {
   if (!markdown) return { data: { text: '' }, children: [] };
 
   const { root } = transformer.transform(markdown);
-  return buildRootNode(root);
+  return buildRootNode(root, dark);
 }
