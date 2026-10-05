@@ -1,6 +1,8 @@
-import { initializeApp, getApps, getApp } from 'firebase/app';
+import { initializeApp, getApps, getApp, setLogLevel } from 'firebase/app';
 import { initializeFirestore, getFirestore, connectFirestoreEmulator } from 'firebase/firestore';
 import { getAuth, connectAuthEmulator } from 'firebase/auth';
+
+try { setLogLevel('error'); } catch {}
 
 const environment = import.meta.env;
 const authDomain = environment.VITE_FIREBASE_AUTH_DOMAIN?.trim() || '';
@@ -53,25 +55,24 @@ export async function getAppCheckToken(forceRefresh = false) {
 
       const rawGetToken = typeof baseProvider.getToken === 'function' ? baseProvider.getToken.bind(baseProvider) : null;
       let lastFailure = 0;
+      const safeTokenHandler = async () => {
+        if (Date.now() - lastFailure < 60000) {
+          return { token: '', expireTimeMillis: Date.now() + 60000 };
+        }
+        try {
+          if (rawGetToken) {
+            const tokenResult = await rawGetToken();
+            if (tokenResult?.token) return tokenResult;
+          }
+          return { token: '', expireTimeMillis: Date.now() + 60000 };
+        } catch {
+          lastFailure = Date.now();
+          return { token: '', expireTimeMillis: Date.now() + 60000 };
+        }
+      };
       if (rawGetToken) {
-        baseProvider.getToken = async () => {
-          if (Date.now() - lastFailure < 60000) {
-            return { token: '', expireTimeMillis: Date.now() + 60000 };
-          }
-          try {
-            return await rawGetToken();
-          } catch {
-            lastFailure = Date.now();
-            try {
-              const AltProvider = providerName === 'enterprise' ? sdk.ReCaptchaV3Provider : sdk.ReCaptchaEnterpriseProvider;
-              const alt = new AltProvider(siteKey);
-              if (typeof alt.getToken === 'function') {
-                return await alt.getToken();
-              }
-            } catch {}
-            return { token: '', expireTimeMillis: Date.now() + 60000 };
-          }
-        };
+        baseProvider.getToken = safeTokenHandler;
+        baseProvider.getLimitedUseToken = safeTokenHandler;
       }
 
       appCheck = sdk.initializeAppCheck(app, { provider: baseProvider, isTokenAutoRefreshEnabled: false });

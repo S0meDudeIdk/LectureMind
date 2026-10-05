@@ -1,5 +1,4 @@
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
 import { createApp } from './server/app';
 import { createProductionDependencies } from './server/adapters';
 export { createApp } from './server/app';
@@ -28,7 +27,14 @@ export async function startServer() {
 }
 
 // Importing this module never initializes credentials or opens a server.
-const invokedPath = process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href;
-if (invokedPath === import.meta.url || /[/\\]server\.cjs$/.test(process.argv[1] || '')) {
+const isMainModule = () => {
+  if (typeof require !== 'undefined' && typeof module !== 'undefined' && require.main === module) {
+    return true;
+  }
+  const entry = process.argv[1] ? path.resolve(process.argv[1]) : '';
+  return /[/\\]server\.[cm]?[jt]s$/.test(entry);
+};
+
+if (isMainModule()) {
   startServer().catch((error) => { console.error('Server startup failed:', error.message); process.exitCode = 1; });
 }

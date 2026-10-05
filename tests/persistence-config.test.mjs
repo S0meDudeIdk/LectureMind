@@ -14,7 +14,7 @@ async function loadConfiguration(environment) {
       builder.onResolve({ filter: /^firebase\// }, ({ path }) => ({ path, namespace: 'mock' }));
       builder.onLoad({ filter: /.*/, namespace: 'mock' }, () => ({ contents: `
         const state=globalThis.__configurationTest;
-        export function initializeApp(config){state.config=config;return{config};} export const getApps=()=>[]; export const getApp=()=>({});
+        export function initializeApp(config){state.config=config;return{config};} export const getApps=()=>[]; export const getApp=()=>({}); export const setLogLevel=()=>{};
         export const initializeFirestore=()=>({}); export const getFirestore=()=>({}); export const getAuth=()=>({}); export const getStorage=()=>({});
         export const connectAuthEmulator=(_auth,url)=>state.connections.push(['auth',url]);
         export const connectFirestoreEmulator=(_db,host,port)=>state.connections.push(['firestore',host,port]);

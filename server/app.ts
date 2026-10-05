@@ -23,15 +23,29 @@ export function createApp(deps: Dependencies) {
     const origin = req.get('origin');
     const isAllowed = !origin || config.allowedOrigins.includes(origin) || (() => {
       try {
+        if (origin === 'null') return true;
         const host = new URL(origin).hostname;
-        return host === 'localhost' || host === '127.0.0.1' || host === 'lecturemind.ai.studio' || host.endsWith('.ai.studio') || host.endsWith('.run.app');
+        return host === 'localhost' ||
+          host === '127.0.0.1' ||
+          host === 'lecturemind.ai.studio' ||
+          host === 'aistudio.google.com' ||
+          host === 'ai.google.dev' ||
+          host.endsWith('.ai.studio') ||
+          host.endsWith('.google.com') ||
+          host.endsWith('.googleusercontent.com') ||
+          host.endsWith('.run.app') ||
+          host.endsWith('.web.app') ||
+          host.endsWith('.firebaseapp.com');
       } catch { return false; }
     })();
-    if (origin && !isAllowed) return res.status(403).json({code:'ORIGIN_DENIED',error:'This origin is not allowed.'});
-    if (origin) { res.setHeader('Access-Control-Allow-Origin', origin); res.setHeader('Vary','Origin'); }
+    if (origin && isAllowed) { res.setHeader('Access-Control-Allow-Origin', origin); res.setHeader('Vary','Origin'); }
     res.setHeader('Access-Control-Allow-Methods','GET, POST, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers','Content-Type, Authorization, X-Firebase-AppCheck, X-Upload-Id, X-Chunk-Index');
-    if (req.method === 'OPTIONS') return res.sendStatus(204);
+    if (req.method === 'OPTIONS') {
+      if (origin && !isAllowed) return res.status(403).json({code:'ORIGIN_DENIED',error:'This origin is not allowed.'});
+      return res.sendStatus(204);
+    }
+    if (origin && !isAllowed) return res.status(403).json({code:'ORIGIN_DENIED',error:'This origin is not allowed.'});
     next();
   });
   app.get('/api/health', (_req,res) => res.json({status:'ok'}));
