@@ -4,7 +4,7 @@ import { useAuth } from '../services/auth.js';
 import { getMaxFileSizeBytes, formatFileSize } from '../utils/authLimits.js';
 
 export default function DropZone({ onFileSelect }) {
-  const { user } = useAuth();
+  const { user, loading } = useAuth();
   const [isDragging, setIsDragging] = useState(false);
   const [error, setError] = useState(null);
 
@@ -30,13 +30,13 @@ export default function DropZone({ onFileSelect }) {
     const isAudio = file.type.startsWith('audio/');
     const isVideo = file.type === 'video/mp4';
     if (!isAudio && !isVideo) {
-      alert("Please upload an audio or video file (MP3, WAV, M4A, MP4).");
+      setError("Please upload an audio or video file (MP3, WAV, M4A, MP4).");
       return;
     }
 
     if (file.size > maxBytes) {
       const currentLimit = formatFileSize(maxBytes);
-      if (!user) {
+      if (!user || user.isAnonymous) {
         setError(`Please sign in to upload files larger than ${currentLimit}.`);
       } else {
         setError(`File exceeds the ${currentLimit} upload limit for your account.`);
@@ -65,7 +65,7 @@ export default function DropZone({ onFileSelect }) {
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
-        className="relative flex flex-col items-center justify-center w-full h-72 border-2 border-dashed rounded-2xl cursor-pointer transition-all"
+        className="relative focus-within:ring-2 focus-within:ring-indigo-500 flex flex-col items-center justify-center w-full h-72 border-2 border-dashed rounded-2xl cursor-pointer transition-all"
         style={{
           borderColor: isDragging ? '#6366F1' : 'var(--color-border-subtle)',
           backgroundColor: isDragging ? 'rgba(99,102,241,0.06)' : 'var(--color-surface-alt)',
@@ -94,7 +94,9 @@ export default function DropZone({ onFileSelect }) {
         </div>
         <input 
           type="file" 
-          className="hidden" 
+          aria-label="Upload lecture recording"
+          disabled={loading}
+          className="sr-only"
           accept="audio/*,video/mp4" 
           onChange={handleFileInput}
         />

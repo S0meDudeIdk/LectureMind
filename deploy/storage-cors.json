@@ -1,0 +1,8 @@
+[
+  {
+    "origin": ["https://lecturemind-pawm2oi75q-as.a.run.app", "http://localhost:3000", "http://127.0.0.1:3000"],
+    "method": ["GET", "HEAD", "PUT"],
+    "responseHeader": ["Content-Type", "Content-Length", "ETag", "x-goog-if-generation-match"],
+    "maxAgeSeconds": 3600
+  }
+]

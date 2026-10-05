@@ -15,7 +15,7 @@ export default defineConfig({
     host: '0.0.0.0',
   },
   build: {
-    outDir: 'dist',
+    outDir: 'dist/public',
     sourcemap: false,
   },
 });

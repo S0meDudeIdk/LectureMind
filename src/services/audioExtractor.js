@@ -4,7 +4,7 @@
  */
 
 import { FFmpeg } from '@ffmpeg/ffmpeg';
-import { fetchFile, toBlobURL } from '@ffmpeg/util';
+import { fetchFile } from '@ffmpeg/util';
 
 const CORE_VERSION = '0.12.10';
 // Single-thread core avoids SharedArrayBuffer / cross-origin isolation headers,
@@ -17,6 +17,9 @@ const WASM_URL = `${CORE_BASE_URL}/ffmpeg-core.wasm`;
 /** Shared FFmpeg instance; load once and reuse across calls. */
 let ffmpegInstance = null;
 let ffmpegLoadPromise = null;
+let loadingInstance = null;
+let loadController = null;
+let loadGeneration = 0;
 
 /**
  * Initialize (or return) a shared FFmpeg instance loaded from the public CDN.
@@ -27,19 +30,35 @@ export async function initFfmpeg() {
   if (ffmpegInstance) return ffmpegInstance;
   if (ffmpegLoadPromise) return ffmpegLoadPromise;
 
-  ffmpegLoadPromise = (async () => {
+  const generation = loadGeneration;
+  const controller = new AbortController();
+  loadController = controller;
+  const loading = (async () => {
     const ffmpeg = new FFmpeg();
-
-    await ffmpeg.load({
-      coreURL: await toBlobURL(CORE_URL, 'text/javascript'),
-      wasmURL: await toBlobURL(WASM_URL, 'application/wasm'),
-    });
-
-    ffmpegInstance = ffmpeg;
-    return ffmpeg;
+    loadingInstance = ffmpeg;
+    controller.signal.addEventListener('abort', () => { try { ffmpeg.terminate(); } catch {} }, { once: true });
+    const urls = [];
+    const timeout = setTimeout(() => controller.abort(), 120000);
+    try {
+      const asset = async (url, type) => {
+        const response = await fetch(url, { signal: controller.signal });
+        if (!response.ok) throw new Error(`Audio processor asset unavailable (${response.status}).`);
+        const data = await response.arrayBuffer();
+        if (controller.signal.aborted || generation !== loadGeneration) throw new DOMException('Cancelled', 'AbortError');
+        const blobUrl = URL.createObjectURL(new Blob([data], { type })); urls.push(blobUrl); return blobUrl;
+      };
+      await ffmpeg.load({ coreURL: await asset(CORE_URL, 'text/javascript'), wasmURL: await asset(WASM_URL, 'application/wasm') });
+      if (controller.signal.aborted || generation !== loadGeneration) throw new DOMException('Cancelled', 'AbortError');
+      ffmpegInstance = ffmpeg;
+      return ffmpeg;
+    } catch (error) { try { ffmpeg.terminate(); } catch {} throw error; }
+    finally {
+      clearTimeout(timeout); urls.forEach(url => URL.revokeObjectURL(url));
+      if (generation === loadGeneration) { loadingInstance = null; loadController = null; }
+    }
   })();
-
-  return ffmpegLoadPromise;
+  ffmpegLoadPromise = loading;
+  try { return await loading; } catch (error) { if (ffmpegLoadPromise === loading) ffmpegLoadPromise = null; throw error; }
 }
 
 /**
@@ -101,12 +120,13 @@ export async function extractAudioFromVideo(file, onProgress) {
   const inputName = 'input_video';
   const outputName = 'output_audio.m4a';
 
-  ffmpeg.on('progress', ({ progress }) => {
+  const progressHandler = ({ progress }) => {
     const normalized = typeof progress === 'number' && Number.isFinite(progress)
       ? Math.max(0, Math.min(1, progress))
       : 0;
     onProgress?.(normalized);
-  });
+  };
+  ffmpeg.on('progress', progressHandler);
 
   try {
     await ffmpeg.writeFile(inputName, await fetchFile(file));
@@ -134,7 +154,7 @@ export async function extractAudioFromVideo(file, onProgress) {
   } finally {
     if (typeof ffmpeg.off === 'function') {
       try {
-        ffmpeg.off('progress');
+        ffmpeg.off('progress', progressHandler);
       } catch {}
     }
     try {
@@ -151,9 +171,8 @@ export async function extractAudioFromVideo(file, onProgress) {
  * Safe to call even if ffmpeg was never loaded.
  */
 export function terminateFfmpeg() {
-  if (ffmpegInstance) {
-    ffmpegInstance.terminate();
-    ffmpegInstance = null;
-    ffmpegLoadPromise = null;
-  }
+  loadGeneration++;
+  loadController?.abort();
+  try { (ffmpegInstance || loadingInstance)?.terminate(); } catch {}
+  ffmpegInstance = null; loadingInstance = null; loadController = null; ffmpegLoadPromise = null;
 }

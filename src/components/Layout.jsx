@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import Header from './Header';
 import { SidebarProvider } from '../context/SidebarContext';
 
@@ -6,7 +6,13 @@ export default function Layout({
   sidebar, children, activeTab, setActiveTab, hasContent, 
   onExportMd, onExportDocs, onExportMindmapJpg, onExportMindmapPng, onExportMindmapPdf
 }) {
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState(() => window.innerWidth >= 640);
+  const sidebarRef = useRef(null);
+  useEffect(() => {
+    if (!sidebarOpen && sidebarRef.current?.contains(document.activeElement)) {
+      document.getElementById('sidebar-toggle')?.focus();
+    }
+  }, [sidebarOpen]);
 
   return (
     <div
@@ -29,6 +35,10 @@ export default function Layout({
       <div className="flex flex-1 overflow-hidden relative">
         {/* Sidebar — floats over the canvas so the mindmap canvas never resizes */}
         <aside
+          id="lecture-sidebar"
+          ref={sidebarRef}
+          inert={!sidebarOpen}
+          aria-hidden={!sidebarOpen}
           className="absolute left-0 top-0 bottom-0 z-20 transition-transform duration-250 ease-in-out"
           style={{
             width: '240px',

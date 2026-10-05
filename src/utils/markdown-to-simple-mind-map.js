@@ -1,6 +1,10 @@
 import { Transformer } from 'markmap-lib';
+import katex from 'katex';
 import * as d3 from 'd3';
+import { sanitizeHtml } from './sanitizeHtml';
 
+// Markmap's browser math plugin reads this global at transform time.
+if (typeof window !== 'undefined') window.katex = katex;
 const transformer = new Transformer();
 
 const BRANCH_PALETTE = [
@@ -48,24 +52,8 @@ function cleanRichText(html) {
   // Remove stray annotations and mathml outside .katex as well.
   root.querySelectorAll('.katex-mathml, annotation').forEach((el) => el.remove());
 
-  // Deduplicate by normalized LaTeX source.
-  const normalize = (s) =>
-    String(s)
-      .replace(/\\displaystyle|\\inline/g, '')
-      .replace(/\s+/g, ' ')
-      .trim();
-  const seen = new Set();
-  root.querySelectorAll('.katex').forEach((el) => {
-    const source = el.dataset.latexSource || el.textContent;
-    const key = normalize(source);
-    if (seen.has(key)) {
-      el.remove();
-    } else {
-      seen.add(key);
-    }
-  });
-
-  return root.innerHTML;
+  // Repeated equations can carry meaning. Preserve every independent render.
+  return sanitizeHtml(root.innerHTML);
 }
 
 function isDark() {

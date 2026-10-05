@@ -1,5 +1,7 @@
-import { useEffect, useState, useMemo, useRef, useCallback } from 'react';
+import { useEffect, useLayoutEffect, useState, useMemo, useRef, useCallback } from 'react';
 import { marked } from 'marked';
+import { sanitizeHtml } from '../utils/sanitizeHtml';
+import { copyText } from '../utils/clipboard';
 import katex from 'katex';
 import CodeMirror from '@uiw/react-codemirror';
 import { markdown as markdownLang } from '@codemirror/lang-markdown';
@@ -175,8 +177,13 @@ export const renderMarkdownWithLatex = (markdownText) => {
   const mathBlocks = [];
   const mathInlines = [];
 
+  const codeSnippets = [];
+  const protectedMarkdown = markdownText.replace(/```[\s\S]*?```|`[^`\n]+`/g, code => {
+    codeSnippets.push(code);
+    return `LECTUREMINDEDITORCODE${codeSnippets.length - 1}END`;
+  });
   // 1. Stash block math $$...$$
-  let processed = markdownText.replace(/\$\$([\s\S]+?)\$\$/g, (_, math) => {
+  let processed = protectedMarkdown.replace(/\$\$([\s\S]+?)\$\$/g, (_, math) => {
     const placeholder = `%%KATEX_BLOCK_${mathBlocks.length}%%`;
     mathBlocks.push(math.trim());
     return `\n\n${placeholder}\n\n`;
@@ -190,6 +197,7 @@ export const renderMarkdownWithLatex = (markdownText) => {
   });
 
   // 3. Parse Markdown structure safely with marked
+  processed = processed.replace(/LECTUREMINDEDITORCODE(\d+)END/g, (_, index) => codeSnippets[Number(index)]);
   let html = marked.parse(processed, { gfm: true, breaks: true });
 
   // 4. Restore block math with KaTeX
@@ -199,7 +207,7 @@ export const renderMarkdownWithLatex = (markdownText) => {
     try {
       const rendered = katex.renderToString(rawMath, { 
         displayMode: true, 
-        throwOnError: false, 
+        throwOnError: false, trust: false,
         output: 'html' 
       });
       return `<div class="katex-block my-4 text-center overflow-x-auto py-2.5 px-4 rounded-lg bg-surface-alt/70 border border-border/60">${rendered}</div>`;
@@ -215,7 +223,7 @@ export const renderMarkdownWithLatex = (markdownText) => {
     try {
       const rendered = katex.renderToString(rawMath, { 
         displayMode: false, 
-        throwOnError: false, 
+        throwOnError: false, trust: false,
         output: 'html' 
       });
       return `<span class="katex-inline px-0.5 inline-block align-middle">${rendered}</span>`;
@@ -224,12 +232,16 @@ export const renderMarkdownWithLatex = (markdownText) => {
     }
   });
 
-  return html;
+  return sanitizeHtml(html);
 };
 
+const statusForSync = status => status === 'conflict' ? 'conflict' : status === 'error' ? 'cloud-error' : status === 'pending' ? 'local' : status === 'local-only' ? 'local-only' : 'saved';
+
 export default function MarkdownEditor({ 
+  lectureId,
   markdown = "", 
-  notes = null, 
+  notes = null,
+  syncStatus,
   onContentChange,
   onSave
 }) {
@@ -239,49 +251,81 @@ export default function MarkdownEditor({
 
   const [rawMarkdown, setRawMarkdown] = useState(initialContent);
   const [copied, setCopied] = useState(false);
-  const [saveStatus, setSaveStatus] = useState('saved'); // 'saved' | 'saving' | 'unsaved'
+  const [saveError, setSaveError] = useState(null);
+  const revisionRef = useRef(0);
+  const currentLectureRef = useRef(lectureId);
+  useLayoutEffect(() => { currentLectureRef.current = lectureId; }, [lectureId]);
+
+  const [saveStatus, setSaveStatus] = useState(() => statusForSync(syncStatus)); // 'saved' | 'saving' | 'unsaved'
   const editorViewRef = useRef(null);
   const saveTimeoutRef = useRef(null);
+  const pendingSaveRef = useRef(null);
 
   const { theme } = useTheme();
   const isLight = theme === 'light';
 
-  // Sync when external lecture selection changes
   const lastSyncedContentRef = useRef(initialContent);
+  const previousLectureRef = useRef(lectureId);
   useEffect(() => {
-    const nextContent = notes !== null && notes !== undefined ? notes : markdown;
-    if (nextContent !== null && nextContent !== undefined && nextContent !== lastSyncedContentRef.current) {
-      lastSyncedContentRef.current = nextContent;
-      setRawMarkdown(nextContent);
-      setSaveStatus('saved');
-    }
-  }, [notes, markdown]);
-
-  // Clean up timer on unmount
-  useEffect(() => {
-    return () => {
+    const next = notes ?? markdown ?? '';
+    if (previousLectureRef.current !== lectureId) {
       if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
-    };
+      const pending = pendingSaveRef.current;
+      pendingSaveRef.current = null;
+      if (pending) Promise.resolve().then(() => pending.save(pending.content, pending.target)).catch(error => console.error('Pending note save failed:', error));
+      revisionRef.current++;
+      previousLectureRef.current = lectureId;
+      setSaveError(null);
+      setSaveStatus(statusForSync(syncStatus));
+    }
+    if (next !== lastSyncedContentRef.current) {
+      lastSyncedContentRef.current = next;
+      setRawMarkdown(next);
+    }
+  }, [lectureId, notes, markdown, syncStatus]);
+
+  useEffect(() => {
+    setSaveStatus(current => ['saving', 'unsaved', 'error'].includes(current) ? current : statusForSync(syncStatus));
+  }, [syncStatus]);
+
+  useEffect(() => () => {
+    if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+    const pending = pendingSaveRef.current;
+    pendingSaveRef.current = null;
+    if (pending) Promise.resolve().then(() => pending.save(pending.content, pending.target)).catch(error => console.error('Pending note save failed:', error));
+    revisionRef.current++;
   }, []);
 
-  // Trigger Save function
-  const triggerSave = useCallback((contentToSave) => {
+  const triggerSave = useCallback(async (contentToSave, targetId = lectureId, revision = revisionRef.current) => {
+    if (targetId !== currentLectureRef.current) return;
     setSaveStatus('saving');
-    onSave?.(contentToSave);
-    setTimeout(() => {
-      setSaveStatus('saved');
-    }, 350);
-  }, [onSave]);
+    setSaveError(null);
+    try {
+      if (!onSave) throw new Error('Saving is unavailable.');
+      const record = await onSave(contentToSave, targetId);
+      if (targetId !== currentLectureRef.current || revision !== revisionRef.current) return;
+      const sync = record?.syncStatus;
+      setSaveStatus(statusForSync(sync));
+    } catch (error) {
+      if (targetId !== currentLectureRef.current || revision !== revisionRef.current) return;
+      setSaveStatus('error');
+      setSaveError(error.message || 'Could not save notes.');
+    }
+  }, [onSave, lectureId]);
 
-  // CodeMirror update handler with auto-save debounce
   const handleCodeMirrorChange = (val) => {
+    lastSyncedContentRef.current = val;
     setRawMarkdown(val);
     setSaveStatus('unsaved');
+    setSaveError(null);
+    const revision = ++revisionRef.current;
     onContentChange?.(renderMarkdownWithLatex(val), val);
-
     if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+    const targetId = lectureId;
+    pendingSaveRef.current = { content: val, target: targetId, save: onSave };
     saveTimeoutRef.current = setTimeout(() => {
-      triggerSave(val);
+      pendingSaveRef.current = null;
+      triggerSave(val, targetId, revision);
     }, 600);
   };
 
@@ -414,10 +458,12 @@ export default function MarkdownEditor({
     }
   };
 
-  const handleCopyMarkdown = () => {
-    navigator.clipboard.writeText(rawMarkdown);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
+  const handleCopyMarkdown = async () => {
+    try {
+      await copyText(rawMarkdown);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch (error) { setSaveError(error.message); }
   };
 
   // Extensions for Hybrid Live Preview
@@ -499,6 +545,7 @@ export default function MarkdownEditor({
           run: (view) => {
             const docStr = view.state.doc.toString();
             if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+            pendingSaveRef.current = null;
             triggerSave(docStr);
             return true;
           },
@@ -515,6 +562,7 @@ export default function MarkdownEditor({
         {/* Left: Auto-save badge + Copy MD Button */}
         <div className="flex items-center gap-2 shrink-0 z-10">
           {/* Auto-save status */}
+          <span role="status" className="text-xs">{saveStatus === 'local' ? 'Saved on this device · cloud pending' : saveStatus === 'local-only' ? 'Saved on this device' : saveStatus === 'cloud-error' ? 'Saved on this device · cloud sync failed' : saveStatus === 'conflict' ? 'Saved locally · sync conflict' : saveStatus === 'error' ? 'Save failed' : ''}</span>
           <div className="flex items-center gap-1 px-1.5 py-0.5 text-[11.5px] font-medium text-text-muted select-none">
             {saveStatus === 'saving' && (
               <span className="flex items-center gap-1 text-primary-light">
@@ -559,7 +607,7 @@ export default function MarkdownEditor({
         </div>
 
         {/* Center: Formatting Ribbon (Precisely Centered) */}
-        <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 flex items-center gap-0.5 bg-surface-alt/70 p-0.5 rounded-lg border border-black/10 dark:border-white/10 shadow-xs z-10">
+        <div className="flex shrink-0 items-center gap-0.5 bg-surface-alt/70 p-0.5 rounded-lg border border-black/10 dark:border-white/10 shadow-xs z-10">
           {/* Clear Notation Button */}
           <button
             onClick={() => applyFormatting('clear')}
@@ -694,10 +742,12 @@ export default function MarkdownEditor({
         <div className="w-8 shrink-0 pointer-events-none" />
       </div>
 
+      {saveError && <p role="alert" className="px-3 py-2 text-sm text-rose-500">{saveError}</p>}
       {/* ── Editor Viewport Body: Pure Interactive Hybrid Live Preview ── */}
       <div className="flex-1 overflow-hidden relative">
         <div className="h-full overflow-auto bg-surface">
           <CodeMirror
+            key={lectureId}
             value={rawMarkdown}
             height="100%"
             theme={isLight ? 'light' : 'dark'}

@@ -1,3 +1,5 @@
+import { getStoredDriveToken, clearDriveToken } from '../services/auth';
+import { prepareDocsMathImages } from './docsMathImages';
 import { markdownToGoogleDocsHtml } from './googleDocsConverter';
 import katexCss from 'katex/dist/katex.min.css?inline';
 import { downloadFile, readBlob } from 'simple-mind-map/src/utils/index.js';
@@ -12,7 +14,7 @@ function sanitizeFilename(title) {
 
 // SVG images cannot fetch external fonts. Embed one WOFF2 source per face and
 // cache only successful loads; a network failure must remain retryable.
-function getKatexCssForExport() {
+export function getKatexCssForExport() {
   if (!embeddedKatexCss) {
     embeddedKatexCss = (async () => {
       let css = katexCss.replace(/src:([^;}]+)/g, (rule, sources) => {
@@ -211,6 +213,12 @@ export async function uploadHtmlToGoogleDrive(htmlContent, title, accessToken) {
 
   if (!res.ok) {
     const errData = await res.json().catch(() => ({}));
+    if (res.status === 401) {
+      clearDriveToken();
+      const error = new Error('Google Drive authorization expired. Authorize Drive again and retry.');
+      error.code = 'drive/authorization-expired';
+      throw error;
+    }
     throw new Error(errData.error?.message || `Google Drive API error: ${res.statusText}`);
   }
 
@@ -226,15 +234,15 @@ export async function uploadHtmlToGoogleDrive(htmlContent, title, accessToken) {
  * ensuring the user is authenticated before invoking this function.
  */
 export async function exportToGoogleDriveDirect(content, title = 'Lecture Notes', accessToken = null) {
-  const htmlContent = markdownToGoogleDocsHtml(content, title);
-
-  const storedToken = sessionStorage.getItem('lecturemind_drive_access_token') || localStorage.getItem('lecturemind_drive_access_token');
+  const storedToken = getStoredDriveToken();
   const effectiveToken = isValidAccessToken(accessToken) ? accessToken : storedToken;
 
   if (!isValidAccessToken(effectiveToken)) {
     throw new Error('You must be signed in with Google to export directly to Google Drive.');
   }
 
+  const mathImages = await prepareDocsMathImages(content);
+  const htmlContent = markdownToGoogleDocsHtml(content, title, { mathImages });
   return await uploadHtmlToGoogleDrive(htmlContent, title, effectiveToken);
 }
 
@@ -267,7 +275,7 @@ export async function exportToDocsViaClipboard(content, title = 'Lecture Notes')
  * Universal Export to Google Docs router
  */
 export async function exportToGoogleDocs(content, title = 'Lecture Notes') {
-  const storedToken = sessionStorage.getItem('lecturemind_drive_access_token') || localStorage.getItem('lecturemind_drive_access_token');
+  const storedToken = getStoredDriveToken();
   if (storedToken) {
     try {
       await exportToGoogleDriveDirect(content, title, storedToken);

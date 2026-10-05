@@ -1,27 +1,8 @@
-import {
-  collection,
-  addDoc,
-  getDocs,
-  getDoc,
-  doc,
-  updateDoc,
-  deleteDoc,
-  query,
-  orderBy,
-  limit,
-  serverTimestamp
-} from 'firebase/firestore';
-import { db, isFirebaseConfigured } from './firebase';
+import { collection, doc, getDoc, query, where, orderBy, limit, onSnapshot, runTransaction } from 'firebase/firestore';
+import { db, isFirebaseConfigured, auth } from './firebase';
 import { deleteMediaFromCloud } from './storage';
-import { deleteMediaFromLocalDb } from './mediaDb';
-import { isAnonymous } from '../utils/authLimits';
-
-const COLLECTION_NAME = 'mindmaps';
-const LOCAL_STORAGE_KEY = 'lecturemind_saved_mindmaps';
-const INITIALIZED_KEY = 'lecturemind_db_initialized_v6';
-
-
-const EVENT_STORAGE_UPDATE = 'lecturemind_storage_update';
+import { getOwnerScope, isAnonymous } from '../utils/authLimits';
+import { createLectureId, localTransaction, requestResult, readLocalRecord, readLocalScope, notifyLocalChange } from './localDb';
 
 const INITIAL_SAMPLE_MINDMAPS = [
   { 
@@ -232,363 +213,366 @@ Integer solutions $(a, b, c)$ satisfying $a^2 + b^2 = c^2$:
   }
 ];
 
-let isFirestoreDisabled = false;
+const CONTENT_FIELDS = ['title', 'markdown', 'notes', 'duration', 'transcript', 'fileName', 'fileSize', 'mimeType', 'isVideo', 'audioUrl', 'playbackUploadId', 'originalMimeType', 'status', 'generationStatus', 'mediaStatus', 'error'];
+const syncRuns = new Map();
+const retryTimers = new Map();
+const retryAttempts = new Map();
 
-// Timeout wrapper: ensures offline queue never hangs the JavaScript execution thread
-const timeoutPromise = (promise, ms = 2000) => {
-  return Promise.race([
-    promise,
-    new Promise((_, reject) =>
-      setTimeout(() => reject(new Error('Firestore operation timed out / blocked by client')), ms)
-    ),
-  ]);
-};
+function contentOnly(input) {
+  return Object.fromEntries(CONTENT_FIELDS.filter((key) => input[key] !== undefined).map((key) => [key, input[key]]));
+}
+function canCloudSync(user) {
+  return Boolean(isFirebaseConfigured && db && user?.uid && !isAnonymous(user));
+}
+function sameAuthenticatedUser(user) {
+  return !auth || (auth.currentUser?.uid === user?.uid && !auth.currentUser?.isAnonymous);
+}
+function localStatus(user) { return canCloudSync(user) ? 'pending' : 'local-only'; }
+function displayRecord(record) { return { ...record, date: formatRelativeDate(record.createdAt) }; }
+function cloudRecord(record, revision, writeId) {
+  return { ...contentOnly(record), title: record.title || 'Untitled Lecture', markdown: record.markdown || '', notes: record.notes ?? record.markdown ?? '', transcript: record.transcript || [], id: record.id, ownerUid: record.scope, createdAt: record.createdAt, updatedAt: record.updatedAt, revision, writeId, deleted: Boolean(record.deleted) };
+}
 
-// Helper: Safely fall back to LocalStorage on adblocker or persistent Firestore errors
-const handleFirestoreError = (err) => {
-  const errMsg = (err?.message || '').toLowerCase();
-  const isPermanent =
-    errMsg.includes('blocked by client') ||
-    errMsg.includes('failed to fetch') ||
-    errMsg.includes('network error') ||
-    err?.code === 'unavailable' ||
-    err?.code === 'permission-denied';
-
-  if (isPermanent && !isFirestoreDisabled) {
-    isFirestoreDisabled = true;
-    console.info('[LectureMind] Firestore network restricted (ad blocker or offline). Using LocalStorage seamlessly.');
-  } else {
-    console.warn('[LectureMind] Firestore operation skipped/failed:', err?.message || err);
-  }
-};
-
-// Helper: Read local mindmaps from LocalStorage (with initial sample seeding)
-const getLocalMindmaps = () => {
-  try {
-    const initialized = localStorage.getItem(INITIALIZED_KEY);
-    if (!initialized) {
-      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(INITIAL_SAMPLE_MINDMAPS));
-      localStorage.setItem(INITIALIZED_KEY, 'true');
-      return INITIAL_SAMPLE_MINDMAPS;
-    }
-    const raw = localStorage.getItem(LOCAL_STORAGE_KEY);
-    return raw ? JSON.parse(raw) : [];
-  } catch (err) {
-    console.warn('Failed reading from localStorage:', err);
-    return [];
-  }
-};
-
-// Helper: Save mindmaps list to LocalStorage and broadcast update
-const setLocalMindmaps = (items) => {
-  try {
-    localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(items));
-    localStorage.setItem(INITIALIZED_KEY, 'true');
-    window.dispatchEvent(new CustomEvent(EVENT_STORAGE_UPDATE, { detail: items }));
-  } catch (err) {
-    console.warn('Failed saving to localStorage:', err);
-  }
-};
-
-// Helper: Format a timestamp or Date into human-readable relative string
 export const formatRelativeDate = (timestamp) => {
-  if (!timestamp) return 'Just now';
-  let date;
-  if (timestamp?.toDate) {
-    date = timestamp.toDate();
-  } else if (timestamp instanceof Date) {
-    date = timestamp;
-  } else {
-    date = new Date(timestamp);
+  const date = timestamp?.toDate ? timestamp.toDate() : new Date(timestamp);
+  if (!Number.isFinite(date.getTime())) return 'Just now';
+  const days = Math.floor((Date.now() - date.getTime()) / 86400000);
+  if (days < 1) {
+    const minutes = Math.floor((Date.now() - date.getTime()) / 60000);
+    return minutes < 1 ? 'Just now' : minutes < 60 ? `${minutes}m ago` : 'Today';
   }
-
-  if (isNaN(date?.getTime())) return 'Just now';
-
-  const now = new Date();
-  const diffMs = now - date;
-  const diffSec = Math.floor(diffMs / 1000);
-  const diffMin = Math.floor(diffSec / 60);
-  const diffHours = Math.floor(diffMin / 60);
-  const diffDays = Math.floor(diffHours / 24);
-
-  if (diffDays === 0) {
-    if (diffMin < 1) return 'Just now';
-    if (diffMin < 60) return `${diffMin}m ago`;
-    return 'Today';
-  }
-  if (diffDays === 1) return 'Yesterday';
-  if (diffDays < 7) return `${diffDays} days ago`;
-  return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  if (days === 1) return 'Yesterday';
+  return days < 7 ? `${days} days ago` : date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 };
+export const extractTitleFromMarkdown = (markdown, fallback = 'Untitled Lecture') => markdown?.match(/^#\s+(.+)$/m)?.[1]?.trim() || fallback;
 
-// Helper: Extract top-level title from markdown (# Title)
-export const extractTitleFromMarkdown = (markdown, fallback = 'Untitled Lecture') => {
-  if (!markdown) return fallback;
-  const match = markdown.match(/^#\s+(.+)$/m);
-  return match ? match[1].trim() : fallback;
-};
-
-/**
- * Save a newly generated mindmap with direct or background Firestore sync.
- */
-export const saveMindmap = async (title, markdown, duration = 'Lecture', extraMeta = {}, user = null) => {
-  const docTitle = title || extractTitleFromMarkdown(markdown, 'Untitled Mindmap');
-  const localId = 'local-' + Date.now();
-  const now = new Date();
-
-  const newDoc = {
-    id: localId,
-    title: docTitle,
-    markdown,
-    notes: extraMeta.notes || markdown,
-    duration: duration || 'Lecture',
-    date: 'Just now',
-    createdAt: now.toISOString(),
-    updatedAt: now.toISOString(),
-    ...extraMeta,
-  };
-
-  // 1. Immediately persist locally & notify UI without blocking
-  const localList = getLocalMindmaps();
-  const updatedList = [newDoc, ...localList.filter((item) => item.id !== localId)];
-  setLocalMindmaps(updatedList);
-
-  // 2. Sync to Firestore for authenticated users when configured
-  if (isFirebaseConfigured && db && !isFirestoreDisabled && !isAnonymous(user)) {
-    try {
-      const colRef = collection(db, COLLECTION_NAME);
-      const firestoreData = {
-        title: docTitle,
-        markdown,
-        notes: extraMeta.notes || markdown,
-        duration: duration || 'Lecture',
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-        ...extraMeta,
-      };
-
-      // Try creating the Firestore document directly
-      const docRef = await timeoutPromise(addDoc(colRef, firestoreData), 4000);
-      if (docRef?.id) {
-        console.log(`[Firestore] Document saved successfully with ID:`, docRef.id);
-        newDoc.id = docRef.id;
-
-        const currentList = getLocalMindmaps();
-        const syncedList = [newDoc, ...currentList.filter((item) => item.id !== localId && item.id !== docRef.id)];
-        setLocalMindmaps(syncedList);
-      }
-    } catch (err) {
-      console.warn('[Firestore] Initial addDoc warning (falling back to LocalStorage):', err?.message || err);
-      handleFirestoreError(err);
+async function seedSamples(user) {
+  if (getOwnerScope(user) !== 'guest') return;
+  await localTransaction(['lectures', 'settings'], 'readwrite', async (transaction) => {
+    const settings = transaction.objectStore('settings');
+    if (await requestResult(settings.get('guest-samples-v2'))) return;
+    const store = transaction.objectStore('lectures');
+    const existing = await requestResult(store.getAll());
+    if (!existing.some((record) => record.scope === 'guest')) {
+      for (const sample of INITIAL_SAMPLE_MINDMAPS) store.put({ ...sample, scope: 'guest', ownerUid: null, revision: 0, baseRevision: 0, syncStatus: 'local-only', deleted: false, anonymousOwner: true });
     }
-  }
-
-  return newDoc;
-};
-
-/**
- * Update an existing mindmap title or content.
- */
-export const updateMindmap = async (id, updates = {}, user = null) => {
-  if (!id) return;
-
-  // 1. Update in LocalStorage immediately
-  const localList = getLocalMindmaps();
-  const updatedList = localList.map((item) => {
-    if (item.id === id) {
-      let updatedMarkdown = item.markdown;
-      if (updates.title && item.markdown) {
-        updatedMarkdown = item.markdown.replace(/^#\s+(.+)$/m, `# ${updates.title}`);
-      }
-      return {
-        ...item,
-        ...updates,
-        markdown: updates.markdown !== undefined ? updates.markdown : updatedMarkdown,
-        notes: updates.notes !== undefined ? updates.notes : item.notes,
-        updatedAt: new Date().toISOString(),
-      };
-    }
-    return item;
+    settings.put({ id: 'guest-samples-v2', initializedAt: Date.now() });
   });
-  setLocalMindmaps(updatedList);
+}
 
-  // 2. Sync to Firestore for authenticated users when configured and not a sample ID
-  if (isFirebaseConfigured && db && !isFirestoreDisabled && !isAnonymous(user) && !id.startsWith('sample-') && id !== '1' && id !== '2') {
-    try {
-      if (id.startsWith('local-')) {
-        // If it was created as a local ID due to a previous timeout, create it in Firestore now
-        const itemToCreate = updatedList.find(i => i.id === id);
-        if (itemToCreate) {
-          const colRef = collection(db, COLLECTION_NAME);
-          const docRef = await timeoutPromise(addDoc(colRef, {
-            title: itemToCreate.title || 'Untitled Mindmap',
-            markdown: itemToCreate.markdown || '',
-            notes: itemToCreate.notes || '',
-            duration: itemToCreate.duration || 'Lecture',
-            createdAt: serverTimestamp(),
-            updatedAt: serverTimestamp(),
-            ...updates,
-          }), 4000);
-
-          if (docRef?.id) {
-            console.log('[Firestore] Local draft promoted to Firestore ID:', docRef.id);
-            const currentList = getLocalMindmaps();
-            const reindexedList = currentList.map(item => item.id === id ? { ...item, id: docRef.id } : item);
-            setLocalMindmaps(reindexedList);
-          }
-        }
-      } else {
-        const docRef = doc(db, COLLECTION_NAME, id);
-        await timeoutPromise(updateDoc(docRef, {
-          ...updates,
-          updatedAt: serverTimestamp(),
-        }), 4000);
-        console.log('[Firestore] Document updated successfully:', id);
-      }
-    } catch (err) {
-      console.warn('[Firestore] Update failed:', err?.message || err);
-      handleFirestoreError(err);
+async function registerLocalScope(user) {
+  if (!user?.uid || isAnonymous(user) || !sameAuthenticatedUser(user)) return;
+  const scope = getOwnerScope(user);
+  const changed = await localTransaction(['lectures', 'outbox'], 'readwrite', async (transaction) => {
+    const store = transaction.objectStore('lectures');
+    const records = await requestResult(store.getAll());
+    let updated = false;
+    for (const record of records) {
+      if (record.scope !== scope || !record.anonymousOwner) continue;
+      const next = { ...record, anonymousOwner: false, ownerUid: user.uid };
+      store.put(next);
+      const pending = await requestResult(transaction.objectStore('outbox').get([scope, record.id]));
+      if (pending) transaction.objectStore('outbox').put({ ...pending, record: next });
+      updated = true;
     }
-  }
-};
+    return updated;
+  });
+  if (changed) notifyLocalChange(scope);
+}
 
-/**
- * Delete a mindmap by ID.
- * Cleans up LocalStorage, IndexedDB, Firebase Storage, and Firestore.
- */
-export const deleteMindmap = async (id) => {
-  if (!id) return;
+export async function saveMindmap(title, markdown, duration = 'Lecture', extraMeta = {}, user = null) {
+  const scope = getOwnerScope(user);
+  const now = new Date().toISOString();
+  const id = createLectureId();
+  const record = { ...contentOnly(extraMeta), id, scope, ownerUid: user?.uid || null, anonymousOwner: isAnonymous(user),
+    title: title || extractTitleFromMarkdown(markdown), markdown: markdown || '', notes: extraMeta.notes ?? markdown ?? '', duration,
+    transcript: extraMeta.transcript || [], createdAt: now, updatedAt: now, revision: 1, baseRevision: 0, deleted: false, syncStatus: localStatus(user) };
+  await localTransaction(['lectures', 'outbox'], 'readwrite', (transaction) => {
+    transaction.objectStore('lectures').put(record);
+    transaction.objectStore('outbox').put({ scope, id, record, baseRevision: 0, mutationId: createLectureId() });
+  });
+  notifyLocalChange(scope);
+  void flushPendingSync(user);
+  return displayRecord(record);
+}
 
-  // 1. Delete from LocalStorage immediately
-  const localList = getLocalMindmaps();
-  const targetItem = localList.find((item) => item.id === id);
-  const filteredList = localList.filter((item) => item.id !== id);
-  setLocalMindmaps(filteredList);
+export async function updateMindmap(id, updates = {}, user = null) {
+  const scope = getOwnerScope(user);
+  const record = await localTransaction(['lectures', 'outbox'], 'readwrite', async (transaction) => {
+    const store = transaction.objectStore('lectures');
+    const current = await requestResult(store.get([scope, id]));
+    if (!current || current.deleted) throw new Error('This lecture is unavailable in the selected account.');
+    const patch = contentOnly(updates);
+    if (patch.title && patch.markdown === undefined) patch.markdown = current.markdown?.replace(/^#\s+(.+)$/m, `# ${patch.title}`) || '';
+    const next = { ...current, ...patch, revision: current.revision + 1, updatedAt: new Date().toISOString(), syncStatus: current.conflict ? 'conflict' : localStatus(user) };
+    store.put(next);
+    transaction.objectStore('outbox').put({ scope, id, record: next, baseRevision: current.baseRevision, mutationId: createLectureId(), blocked: Boolean(current.conflict) });
+    return next;
+  });
+  notifyLocalChange(scope);
+  void flushPendingSync(user);
+  return displayRecord(record);
+}
 
-  // 2. Delete from IndexedDB (both by ID and by title/filename if cached)
-  deleteMediaFromLocalDb(id);
-  if (targetItem?.title) {
-    deleteMediaFromLocalDb(targetItem.title);
-  }
-  if (targetItem?.fileName) {
-    deleteMediaFromLocalDb(targetItem.fileName);
-  }
+export async function deleteMindmap(id, user = null) {
+  const scope = getOwnerScope(user);
+  await localTransaction(['lectures', 'outbox', 'media'], 'readwrite', async (transaction) => {
+    const store = transaction.objectStore('lectures');
+    const current = await requestResult(store.get([scope, id]));
+    if (!current) throw new Error('This lecture is unavailable in the selected account.');
+    const next = { ...current, deleted: true, revision: current.revision + 1, updatedAt: new Date().toISOString(), syncStatus: localStatus(user) };
+    delete next.conflict;
+    store.put(next);
+    transaction.objectStore('media').delete([scope, id]);
+    transaction.objectStore('outbox').put({ scope, id, record: next, baseRevision: current.baseRevision, mutationId: createLectureId() });
+  });
+  notifyLocalChange(scope);
+  void flushPendingSync(user);
+  return { id, localSaved: true, syncStatus: localStatus(user) };
+}
 
-  // 3. Delete from Firebase Storage for ANY lecture (including local-* IDs)
-  if (id !== '1' && id !== '2' && !id.startsWith('sample-')) {
-    deleteMediaFromCloud(id, targetItem?.audioUrl);
-  }
-
-  // 4. Background sync: delete from Firestore if not a local/sample ID
-  if (isFirebaseConfigured && db && !isFirestoreDisabled && !id.startsWith('local-') && !id.startsWith('sample-') && id !== '1' && id !== '2') {
-    (async () => {
-      try {
-        const docRef = doc(db, COLLECTION_NAME, id);
-        await timeoutPromise(deleteDoc(docRef), 2000);
-      } catch (err) {
-        handleFirestoreError(err);
-      }
-    })();
-  }
-};
-
-/**
- * Fetch saved mindmaps ordered by creation date descending with timeout protection.
- */
-export const getRecentMindmaps = async (count = 30) => {
-  const localList = getLocalMindmaps();
-
-  if (!isFirebaseConfigured || !db || isFirestoreDisabled) {
-    return localList.slice(0, count);
-  }
-
-  try {
-    const colRef = collection(db, COLLECTION_NAME);
-    const q = query(colRef, orderBy('createdAt', 'desc'), limit(count));
-    const snapshot = await timeoutPromise(getDocs(q), 2000);
-
-    const firestoreItems = snapshot.docs.map((docSnap) => {
-      const data = docSnap.data();
-      return {
-        id: docSnap.id,
-        ...data,
-        date: formatRelativeDate(data.createdAt),
-      };
+async function syncEntry(entry, user) {
+  const reference = doc(db, 'mindmaps', entry.id);
+  let remoteCandidate;
+  let accepted;
+  await runTransaction(db, async (transaction) => {
+    const snapshot = await transaction.get(reference);
+    const remote = snapshot.exists() ? snapshot.data() : null;
+    if (remote && remote.ownerUid !== entry.scope) throw new Error('Cloud ownership does not match this account.');
+    if (remote?.writeId === entry.mutationId) { accepted = remote; return; }
+    if ((remote && remote.revision !== entry.baseRevision) || (!remote && entry.baseRevision > 0)) {
+      remoteCandidate = remote || { deleted: true, missing: true, revision: entry.baseRevision + 1, ownerUid: entry.scope, id: entry.id };
+      return;
+    }
+    // Local edits may advance several times offline; the cloud revision advances once per committed write.
+    const revision = (remote?.revision || 0) + 1;
+    accepted = cloudRecord(entry.record, revision, entry.mutationId);
+    transaction.set(reference, accepted);
+  });
+  if (remoteCandidate) {
+    await localTransaction(['lectures', 'outbox'], 'readwrite', async (transaction) => {
+      const store = transaction.objectStore('lectures');
+      const current = await requestResult(store.get([entry.scope, entry.id]));
+      const pending = await requestResult(transaction.objectStore('outbox').get([entry.scope, entry.id]));
+      if (!current || !pending) return;
+      store.put({ ...current, syncStatus: 'conflict', conflict: { remote: remoteCandidate } });
+      transaction.objectStore('outbox').put({ ...pending, blocked: true });
     });
-
-    if (firestoreItems.length > 0) {
-      setLocalMindmaps(firestoreItems);
-      return firestoreItems;
+    notifyLocalChange(entry.scope);
+    return;
+  }
+  if (entry.record.deleted) await deleteMediaFromCloud(entry.id, null, user);
+  await localTransaction(['lectures', 'outbox'], 'readwrite', async (transaction) => {
+    const store = transaction.objectStore('lectures');
+    const current = await requestResult(store.get([entry.scope, entry.id]));
+    const pending = await requestResult(transaction.objectStore('outbox').get([entry.scope, entry.id]));
+    if (!current || !pending) return;
+    if (pending.mutationId === entry.mutationId) {
+      store.put({ ...current, revision: accepted.revision, baseRevision: accepted.revision, writeId: accepted.writeId, syncStatus: 'synced', anonymousOwner: false, syncError: null });
+      transaction.objectStore('outbox').delete([entry.scope, entry.id]);
+    } else {
+      const next = { ...current, revision: Math.max(current.revision, accepted.revision + 1), baseRevision: accepted.revision };
+      store.put(next);
+      transaction.objectStore('outbox').put({ ...pending, baseRevision: accepted.revision, record: next });
     }
+  });
+  notifyLocalChange(entry.scope);
+}
 
-    return localList.slice(0, count);
-  } catch (err) {
-    handleFirestoreError(err);
-    return localList.slice(0, count);
-  }
-};
+function scheduleRetry(user) {
+  const scope = getOwnerScope(user);
+  if (retryTimers.has(scope)) return;
+  const attempts = Math.min((retryAttempts.get(scope) || 0) + 1, 6);
+  retryAttempts.set(scope, attempts);
+  const timer = setTimeout(() => { retryTimers.delete(scope); void flushPendingSync(user); }, Math.min(60000, 1000 * 2 ** attempts));
+  timer.unref?.();
+  retryTimers.set(scope, timer);
+}
 
-/**
- * Fetch a single mindmap by ID with timeout protection.
- */
-export const getMindmapById = async (id) => {
-  if (!id) return null;
-
-  // Check LocalStorage first
-  const localList = getLocalMindmaps();
-  const localMatch = localList.find((item) => item.id === id);
-  if (localMatch) return localMatch;
-
-  if (isFirestoreDisabled || !isFirebaseConfigured || !db) return null;
-
-  try {
-    const docRef = doc(db, COLLECTION_NAME, id);
-    const docSnap = await timeoutPromise(getDoc(docRef), 2000);
-
-    if (!docSnap.exists()) return null;
-
-    const data = docSnap.data();
-    return {
-      id: docSnap.id,
-      ...data,
-      date: formatRelativeDate(data.createdAt),
-    };
-  } catch (err) {
-    handleFirestoreError(err);
-    return null;
-  }
-};
-
-/**
- * Subscribe to real-time updates for recent mindmaps.
- */
-export const subscribeToRecentMindmaps = (callback, count = 30) => {
-  // 1. Instantly return local items
-  const initialLocal = getLocalMindmaps();
-  callback(initialLocal);
-
-  // 2. Listen to internal local storage broadcasts
-  const handleStorageEvent = (e) => {
-    callback(e.detail || getLocalMindmaps());
-  };
-  const handleWindowStorage = () => {
-    callback(getLocalMindmaps());
-  };
-
-  window.addEventListener(EVENT_STORAGE_UPDATE, handleStorageEvent);
-  window.addEventListener('storage', handleWindowStorage);
-
-  // 3. One-time initial background sync with Firestore if active
-  if (isFirebaseConfigured && db && !isFirestoreDisabled) {
-    getRecentMindmaps(count).then((items) => {
-      if (items && items.length > 0) {
-        callback(items);
+export function flushPendingSync(user = null) {
+  if (!canCloudSync(user) || !sameAuthenticatedUser(user) || globalThis.navigator?.onLine === false) return Promise.resolve();
+  const scope = getOwnerScope(user);
+  if (syncRuns.has(scope)) return syncRuns.get(scope);
+  const run = (async () => {
+    let encounteredFailure = false;
+    for (;;) {
+      const pending = (await readLocalScope('outbox', scope)).filter((entry) => !entry.blocked);
+      if (!pending.length || !sameAuthenticatedUser(user)) break;
+      let failed = false;
+      for (const entry of pending) {
+        if (!sameAuthenticatedUser(user)) return;
+        try { await syncEntry(entry, user); }
+        catch (error) {
+          failed = true;
+          encounteredFailure = true;
+          await localTransaction(['lectures'], 'readwrite', async (transaction) => {
+            const store = transaction.objectStore('lectures');
+            const current = await requestResult(store.get([scope, entry.id]));
+            if (current) store.put({ ...current, syncStatus: 'error', syncError: error.message });
+          });
+          notifyLocalChange(scope);
+          if (!['permission-denied', 'unauthenticated', 'invalid-argument'].includes(error.code)) scheduleRetry(user);
+          break;
+        }
       }
-    }).catch(handleFirestoreError);
-  }
+      if (failed) break;
+    }
+    if (!encounteredFailure) retryAttempts.delete(scope);
+  })().catch((error) => { console.warn('Local sync queue is unavailable:', error.message); }).finally(() => syncRuns.delete(scope));
+  syncRuns.set(scope, run);
+  return run;
+}
 
-  return () => {
-    window.removeEventListener(EVENT_STORAGE_UPDATE, handleStorageEvent);
-    window.removeEventListener('storage', handleWindowStorage);
+async function mergeCloudRecords(records, user) {
+  const scope = getOwnerScope(user);
+  await localTransaction(['lectures', 'outbox'], 'readwrite', async (transaction) => {
+    const store = transaction.objectStore('lectures');
+    const outbox = transaction.objectStore('outbox');
+    for (const remote of records) {
+      if (remote.ownerUid !== scope || !remote.id || !Number.isInteger(remote.revision)) continue;
+      const current = await requestResult(store.get([scope, remote.id]));
+      const pending = await requestResult(outbox.get([scope, remote.id]));
+      if (pending) {
+        if (remote.writeId !== pending.mutationId && remote.revision > pending.baseRevision && !syncRuns.has(scope)) {
+          store.put({ ...current, syncStatus: 'conflict', conflict: { remote } });
+          outbox.put({ ...pending, blocked: true });
+        }
+        continue;
+      }
+      if (!current || remote.revision >= current.baseRevision) store.put({ ...remote, scope, baseRevision: remote.revision, syncStatus: 'synced', anonymousOwner: false });
+    }
+  });
+  notifyLocalChange(scope);
+}
+
+export async function getRecentMindmaps(count = 30, user = null) {
+  await seedSamples(user);
+  await registerLocalScope(user);
+  const list = await readLocalScope('lectures', getOwnerScope(user));
+  return list.filter((record) => !record.deleted).sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt))).slice(0, count).map(displayRecord);
+}
+
+export async function getMindmapById(id, user = null) {
+  const local = await readLocalRecord('lectures', getOwnerScope(user), id);
+  if (local) return local.deleted ? null : displayRecord(local);
+  if (!canCloudSync(user) || !sameAuthenticatedUser(user)) return null;
+  const snapshot = await getDoc(doc(db, 'mindmaps', id));
+  if (!snapshot.exists() || snapshot.data().ownerUid !== user.uid) return null;
+  if (!Number.isInteger(snapshot.data().revision)) throw new Error('This cloud record requires an administrator migration.');
+  await mergeCloudRecords([{ ...snapshot.data(), id: snapshot.id }], user);
+  return getMindmapById(id, user);
+}
+
+export function subscribeToRecentMindmaps(callback, count = 30, user = null) {
+  const scope = getOwnerScope(user);
+  let active = true;
+  let updateVersion = 0;
+  const emit = async () => {
+    const version = ++updateVersion;
+    try {
+      const records = await getRecentMindmaps(count, user);
+      if (active && version === updateVersion) callback(records);
+    } catch (error) { if (active) callback([], { error: error.message }); }
   };
-};
+  const changed = (event) => { if (!event.detail?.scope || event.detail.scope === scope) void emit(); };
+  const reportError = async (error, cloudOnly = false) => {
+    try {
+      const records = await getRecentMindmaps(count, user);
+      if (active) callback(records, { error: error.message, cloudOnly });
+    } catch (localError) { if (active) callback([], { error: localError.message }); }
+  };
+  let unsubscribeCloud = () => {};
+  const startCloudSubscription = () => {
+    unsubscribeCloud();
+    if (!active || !canCloudSync(user) || !sameAuthenticatedUser(user)) return;
+    const reference = query(collection(db, 'mindmaps'), where('ownerUid', '==', user.uid), orderBy('createdAt', 'desc'), limit(count));
+    unsubscribeCloud = onSnapshot(reference, { includeMetadataChanges: true }, (snapshot) => {
+      if (!active || snapshot.metadata.hasPendingWrites || !sameAuthenticatedUser(user)) return;
+      void mergeCloudRecords(snapshot.docs.map((item) => ({ ...item.data(), id: item.id })), user).catch((error) => { void reportError(error); });
+    }, (error) => { void reportError(error, true); });
+  };
+  const online = () => { startCloudSubscription(); void flushPendingSync(user); };
+  globalThis.window?.addEventListener('lecturemind_storage_update', changed);
+  globalThis.window?.addEventListener('online', online);
+  void emit();
+  startCloudSubscription();
+  void flushPendingSync(user);
+  return () => { active = false; ++updateVersion; unsubscribeCloud(); globalThis.window?.removeEventListener('lecturemind_storage_update', changed); globalThis.window?.removeEventListener('online', online); };
+}
+
+export async function resolveMindmapConflict(id, choice, user = null) {
+  if (!['local', 'remote', 'copy'].includes(choice)) throw new Error('Choose local, remote, or copy.');
+  const scope = getOwnerScope(user);
+  let copy;
+  const result = await localTransaction(['lectures', 'outbox', 'media'], 'readwrite', async (transaction) => {
+    const store = transaction.objectStore('lectures');
+    const current = await requestResult(store.get([scope, id]));
+    if (!current?.conflict) return current;
+    const remote = current.conflict.remote;
+    if (choice === 'copy') {
+      copy = { ...current, id: createLectureId(), title: `${current.title} (local copy)`, revision: 1, baseRevision: 0, syncStatus: localStatus(user), createdAt: new Date().toISOString() };
+      delete copy.conflict;
+      store.put(copy);
+      transaction.objectStore('outbox').put({ scope, id: copy.id, record: copy, baseRevision: 0, mutationId: createLectureId() });
+      const media = await requestResult(transaction.objectStore('media').get([scope, id]));
+      if (media) transaction.objectStore('media').put({ ...media, id: copy.id });
+    }
+    const next = choice === 'local' ? { ...current, revision: Math.max(current.revision, remote.revision + 1), baseRevision: remote.missing ? 0 : remote.revision, syncStatus: localStatus(user) } : { ...remote, scope, baseRevision: remote.revision, syncStatus: 'synced' };
+    delete next.conflict;
+    store.put(next);
+    if (choice === 'local') transaction.objectStore('outbox').put({ scope, id, record: next, baseRevision: next.baseRevision, mutationId: createLectureId() });
+    else transaction.objectStore('outbox').delete([scope, id]);
+    return next;
+  });
+  notifyLocalChange(scope);
+  void flushPendingSync(user);
+  return copy || result;
+}
+
+export async function listLegacyMindmaps(user = null) {
+  await registerLocalScope(user);
+  let legacy = [];
+  try {
+    const raw = globalThis.localStorage?.getItem('lecturemind_saved_mindmaps');
+    const parsed = raw ? JSON.parse(raw) : [];
+    if (Array.isArray(parsed)) legacy = parsed.filter((item) => item?.id).map((item) => ({ ...item, legacyId: item.id, id: `legacy:${item.id}`, legacySource: 'legacy', ownership: 'unverified' }));
+  } catch (error) { throw new Error(`Legacy browser records could not be read: ${error.message}`); }
+  const locals = await localTransaction(['lectures'], 'readonly', (transaction) => requestResult(transaction.objectStore('lectures').getAll()));
+  const scope = getOwnerScope(user);
+  for (const item of locals) {
+    if (item.scope !== scope && (item.scope === 'guest' || item.anonymousOwner) && !item.deleted && !item.id.startsWith('sample-')) legacy.push({ ...item, legacyId: item.id, id: `local:${item.scope}:${item.id}`, legacySource: item.scope, ownership: 'guest' });
+  }
+  return legacy;
+}
+
+export async function importLegacyMindmap(id, user = null) {
+  const source = (await listLegacyMindmaps(user)).find((item) => item.id === id);
+  if (!source) throw new Error('That legacy record is unavailable.');
+  const scope = getOwnerScope(user);
+  const imported = await localTransaction(['lectures', 'outbox', 'imports', 'media', 'media_files'], 'readwrite', async (transaction) => {
+    const imports = transaction.objectStore('imports');
+    const prior = await requestResult(imports.get([scope, id]));
+    if (prior) {
+      const existing = await requestResult(transaction.objectStore('lectures').get([scope, prior.lectureId]));
+      if (existing) return existing;
+    }
+    const newId = createLectureId();
+    const now = new Date().toISOString();
+    const record = { ...contentOnly(source), id: newId, scope, ownerUid: user?.uid || null, anonymousOwner: isAnonymous(user), createdAt: now, updatedAt: now, revision: 1, baseRevision: 0, deleted: false, syncStatus: localStatus(user) };
+    // Never reuse an ownerless cloud URL or upload ID as a claimed media association.
+    record.audioUrl = null;
+    delete record.playbackUploadId;
+    const media = source.legacySource === 'legacy'
+      ? await requestResult(transaction.objectStore('media_files').get(String(source.legacyId)))
+      : await requestResult(transaction.objectStore('media').get([source.legacySource, source.legacyId]));
+    if (media?.blob) transaction.objectStore('media').put({ ...media, id: newId, scope });
+    else record.mediaStatus = 'unavailable';
+    transaction.objectStore('lectures').put(record);
+    transaction.objectStore('outbox').put({ scope, id: newId, record, baseRevision: 0, mutationId: createLectureId() });
+    imports.put({ scope, id, lectureId: newId, importedAt: now });
+    return record;
+  });
+  notifyLocalChange(scope);
+  void flushPendingSync(user);
+  return displayRecord(imported);
+}

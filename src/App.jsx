@@ -1,284 +1,131 @@
-import { useState, useMemo } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import Layout from './components/Layout';
 import Sidebar from './components/Sidebar';
 import DropZone from './components/DropZone';
 import LoadingOverlay from './components/LoadingOverlay';
-import MindmapViewer from './components/MindmapViewer';
-import MarkdownEditor from './components/MarkdownEditor';
-import TranscriptViewer from './components/TranscriptViewer';
-import MindmapAudioWidget from './components/MindmapAudioWidget';
 import ErrorBanner from './components/ErrorBanner';
 import ErrorBoundary from './components/ErrorBoundary';
-import GoogleDocsExportModal from './components/GoogleDocsExportModal';
 import { useAudioUpload } from './hooks/useAudioUpload';
 import { useGenerationLimit } from './hooks/useGenerationLimit';
-import { useAuth } from './services/auth.js';
+import { useAuth } from './services/auth';
 import { getMediaFromLocalDb } from './services/mediaDb';
 import { updateMindmap } from './services/db';
-import { 
-  exportMindmapAsImage,
-  exportMarkdownFile 
-} from './utils/exportUtils';
+import { getMediaPlaybackUrl } from './services/storage';
+
+const MindmapViewer = lazy(() => import('./components/MindmapViewer'));
+const MarkdownEditor = lazy(() => import('./components/MarkdownEditor'));
+const MindmapAudioWidget = lazy(() => import('./components/MindmapAudioWidget'));
+const GoogleDocsExportModal = lazy(() => import('./components/GoogleDocsExportModal'));
 
 export default function App() {
-  const { user } = useAuth();
+  const { user, loading } = useAuth();
   const { canGenerate, increment } = useGenerationLimit(user);
-
-  const [activeLectureId, setActiveLectureId] = useState(null);
-  const [customMarkdown, setCustomMarkdown] = useState(null);
-  const [customNotes, setCustomNotes] = useState(null);
-  const [customTranscript, setCustomTranscript] = useState([]);
-  const [customAudioUrl, setCustomAudioUrl] = useState(null);
-  const [customTitle, setCustomTitle] = useState('');
-  const [customIsVideo, setCustomIsVideo] = useState(false);
+  const [active, setActive] = useState(null);
+  const [audioUrl, setAudioUrl] = useState(null);
   const [activeTab, setActiveTab] = useState('mindmap');
-  const [isDocsModalOpen, setIsDocsModalOpen] = useState(false);
-
-  const {
-    processAudio,
-    isProcessing,
-    progressMsg,
-    cloudUploadProgress,
-    error,
-    markdown: uploadedMarkdown,
-    notes: uploadedNotes,
-    transcript: uploadedTranscript,
-    audioUrl: uploadedAudioUrl,
-    fileName: uploadedFileName,
-    isVideo: uploadedIsVideo,
-    reset,
-  } = useAudioUpload({ user, canGenerate, incrementGeneration: increment });
-
-  const activeMarkdown   = customMarkdown !== null ? customMarkdown : (uploadedMarkdown || '');
-  const activeNotes      = customNotes !== null ? customNotes : (uploadedNotes || activeMarkdown);
-  const activeTranscript = customTranscript.length > 0 ? customTranscript : uploadedTranscript;
-  const activeAudioUrl   = customAudioUrl || uploadedAudioUrl;
-  const activeIsVideo    = customIsVideo || uploadedIsVideo;
-  const hasContent       = !!(activeMarkdown && !isProcessing);
-
-  const activeTitle = useMemo(() => {
-    if (customTitle) return customTitle;
-    if (uploadedFileName) return uploadedFileName.replace(/\.[^/.]+$/, '');
-    const match = activeMarkdown.match(/^#\s+(.+)$/m);
-    return match ? match[1] : 'Lecture Mindmap';
-  }, [customTitle, uploadedFileName, activeMarkdown]);
-
-  /* ── Handlers ── */
-  const handleFileSelect = async (file) => {
-    setCustomMarkdown(null);
-    setCustomNotes(null);
-    setCustomTranscript([]);
-    setCustomAudioUrl(null);
-    const isVid = file?.type?.startsWith('video/') || /\.(mp4|mov|webm|mkv)$/i.test(file?.name || '');
-    setCustomIsVideo(isVid);
-    setCustomTitle(file.name ? file.name.replace(/\.[^/.]+$/, '') : '');
-    setActiveLectureId('new');
-    setActiveTab('mindmap');
+  const [editorOpened, setEditorOpened] = useState(false);
+  const [docsOpen, setDocsOpen] = useState(false);
+  const [viewError, setViewError] = useState(null);
+  const selection = useRef(0);
+  const playbackRequest = useRef(null);
+  const ownedBlob = useRef(null);
+  const dirty = useRef(false);
+  const activeRef = useRef(null);
+  useEffect(() => { activeRef.current = active; }, [active]);
+  useEffect(() => {
+    const protectDraft = event => { if (dirty.current) { event.preventDefault(); event.returnValue = ''; } };
+    window.addEventListener('beforeunload', protectDraft);
+    return () => window.removeEventListener('beforeunload', protectDraft);
+  }, []);
+  const clearPlayback = useCallback(() => {
+    playbackRequest.current?.abort();
+    if (ownedBlob.current) URL.revokeObjectURL(ownedBlob.current);
+    ownedBlob.current = null; setAudioUrl(null);
+  }, []);
+  const received = useCallback(record => { dirty.current = false; activeRef.current = record; setActive(record); }, []);
+  const upload = useAudioUpload({ user, canGenerate, incrementGeneration: increment, onRecord: received });
+  const resetUpload = upload.reset;
+  const reset = useCallback(() => {
+    selection.current++; clearPlayback(); dirty.current = false;
+    activeRef.current = null; setActive(null); setActiveTab('mindmap'); setEditorOpened(false); setDocsOpen(false); setViewError(null);
+    resetUpload();
+  }, [clearPlayback, resetUpload]);
+  useEffect(() => { reset(); return () => { playbackRequest.current?.abort(); if (ownedBlob.current) URL.revokeObjectURL(ownedBlob.current); }; }, [user?.uid, reset]);
+  useEffect(() => { if (activeTab === 'editor') setEditorOpened(true); }, [activeTab]);
+  const select = async record => {
+    upload.reset(); const ticket = ++selection.current;
+    clearPlayback(); dirty.current = false; activeRef.current = record; setActive(record); setViewError(null);
+    const controller = new AbortController(); playbackRequest.current = controller;
     try {
-      await processAudio(file);
-    } catch {
-      /* handled by hook */
-    }
+      const cached = await getMediaFromLocalDb(record.id, '', user);
+      if (ticket !== selection.current) return;
+      if (cached?.blob) { const url = URL.createObjectURL(cached.blob); ownedBlob.current = url; setAudioUrl(url); }
+      else if (record.playbackUploadId) {
+        const url = await getMediaPlaybackUrl(record.playbackUploadId, controller.signal);
+        if (ticket === selection.current) setAudioUrl(url);
+      }
+    } catch (failure) { if (ticket === selection.current && failure.name !== 'AbortError') setViewError(`Recording unavailable: ${failure.message}`); }
   };
-
-  const handleLectureSelect = async (lec) => {
-    if (!lec) return;
-    setActiveLectureId(lec.id);
-
-    setCustomMarkdown(lec.markdown !== undefined ? lec.markdown : null);
-    setCustomNotes(lec.notes !== undefined ? lec.notes : null);
-    setCustomTranscript(lec.transcript || []);
-    setCustomTitle(lec.title || '');
-
-    const isVid = !!lec.isVideo || (lec.mimeType?.startsWith('video/') ?? false);
-    setCustomIsVideo(isVid);
-
-    // Hybrid Media Resolution:
-    // 1. Check local IndexedDB first (instant 0ms playback, 0 network bandwidth on same device)
-    let loadedLocally = false;
+  const onFileSelect = async file => {
+    clearPlayback(); const ticket = ++selection.current; dirty.current = false; activeRef.current = null; setActive(null); setActiveTab('mindmap'); setEditorOpened(false); setViewError(null);
     try {
-      const localRecord = await getMediaFromLocalDb(lec.id, lec.fileName || lec.title);
-      if (localRecord && localRecord.blob) {
-        const blobUrl = URL.createObjectURL(localRecord.blob);
-        setCustomAudioUrl(blobUrl);
-        if (localRecord.isVideo !== undefined) {
-          setCustomIsVideo(localRecord.isVideo);
-        }
-        loadedLocally = true;
-      }
-    } catch (err) {
-      console.warn('Local IndexedDB lookup failed, checking cloud URL:', err);
-    }
-
-    // 2. If not found in local IndexedDB (different device / cleared cache), use permanent Firebase Cloud URL
-    if (!loadedLocally) {
-      if (lec.audioUrl) {
-        setCustomAudioUrl(lec.audioUrl);
-      } else {
-        setCustomAudioUrl(null);
-      }
-    }
+      const record = await upload.processAudio(file);
+      if (record) { const local = await getMediaFromLocalDb(record.id, '', user); if (ticket === selection.current && activeRef.current?.id === record.id && local?.blob) { const url = URL.createObjectURL(local.blob); ownedBlob.current = url; setAudioUrl(url); } }
+    } catch (failure) { if (ticket === selection.current && failure.name !== 'AbortError') setViewError(failure.message); }
   };
-
-  const handleNew = () => {
-    setActiveLectureId(null);
-    setCustomMarkdown(null);
-    setCustomNotes(null);
-    setCustomTranscript([]);
-    setCustomAudioUrl(null);
-    setCustomIsVideo(false);
-    setCustomTitle('');
-    setActiveTab('mindmap');
-    reset();
+  const saveNotes = async (content, lectureId) => {
+    if (!lectureId) throw new Error('Select a lecture before saving.');
+    let updated;
+    try { updated = await updateMindmap(lectureId, { notes: content }, user); }
+    catch (failure) { setViewError(`Notes could not be saved: ${failure.message}`); throw failure; }
+    if (activeRef.current?.id === lectureId && activeRef.current.notes === content) { dirty.current = false; setActive(updated); }
+    return updated;
   };
-
-  const handleRenameLecture = (id, newTitle) => {
-    if (id === activeLectureId) {
-      setCustomTitle(newTitle);
-      if (activeMarkdown) {
-        setCustomMarkdown(activeMarkdown.replace(/^#\s+(.+)$/m, `# ${newTitle}`));
-      }
-      if (activeNotes) {
-        setCustomNotes(activeNotes.replace(/^#\s+(.+)$/m, `# ${newTitle}`));
-      }
-    }
-  };
-
-  const handleDeleteLecture = (id) => {
-    if (id === activeLectureId) handleNew();
-  };
-
-  const handleNotesSave = (rawMd) => {
-    setCustomNotes(rawMd);
-    if (activeLectureId && activeLectureId !== 'new') {
-      updateMindmap(activeLectureId, { notes: rawMd });
-    }
-  };
-
-  const handleExportMd = () => {
-    exportMarkdownFile(activeNotes || activeMarkdown, activeTitle || 'lecture-notes');
-  };
-
-  const handleExportDocs = () => {
-    setIsDocsModalOpen(true);
-  };
-
-  const handleExportMindmapJpg = (opts) => {
-    return exportMindmapAsImage(activeTitle || 'lecture-mindmap', 'jpg', opts);
-  };
-
-  const handleExportMindmapPng = (opts) => {
-    return exportMindmapAsImage(activeTitle || 'lecture-mindmap', 'png', opts);
-  };
-
-  const handleExportMindmapPdf = (opts) => {
-    return exportMindmapAsImage(activeTitle || 'lecture-mindmap', 'pdf', opts);
-  };
-
-  const sidebar = (
-    <Sidebar
-      activeId={activeLectureId}
-      onNew={handleNew}
-      onSelectLecture={handleLectureSelect}
-      onRenameLecture={handleRenameLecture}
-      onDeleteLecture={handleDeleteLecture}
-    />
-  );
-
+  const onRecordsChanged = useCallback(records => {
+    setActive(current => {
+      const remote = records.find(item => item.id === current?.id);
+      if (!remote || (remote.revision === current.revision && remote.syncStatus === current.syncStatus)) return current;
+      return dirty.current ? { ...remote, notes: current.notes } : remote;
+    });
+  }, []);
+  const exportImage = async (format, options) => (await import('./utils/exportUtils')).exportMindmapAsImage(active?.title, format, options);
+  const hasContent = Boolean(active?.markdown && !upload.isProcessing);
   return (
-    <Layout
-      sidebar={sidebar}
-      activeTab={activeTab}
-      setActiveTab={setActiveTab}
-      hasContent={hasContent}
-      onExportMd={handleExportMd}
-      onExportDocs={handleExportDocs}
-      onExportMindmapJpg={handleExportMindmapJpg}
-      onExportMindmapPng={handleExportMindmapPng}
-      onExportMindmapPdf={handleExportMindmapPdf}
-    >
-      {/* ── Empty state ── */}
-      {!activeMarkdown && !isProcessing && (
+    <Layout sidebar={<Sidebar activeId={active?.id} onNew={reset} onSelectLecture={select} onRecordsChanged={onRecordsChanged}
+      onRenameLecture={(id, title) => setActive(current => current?.id === id ? { ...current, title } : current)}
+      onDeleteLecture={id => { if (activeRef.current?.id === id) reset(); }} />}
+      activeTab={activeTab} setActiveTab={setActiveTab} hasContent={hasContent}
+      onExportMd={async () => (await import('./utils/exportUtils')).exportMarkdownFile(active?.notes ?? active?.markdown, active?.title)}
+      onExportDocs={() => setDocsOpen(true)}
+      onExportMindmapJpg={opts => exportImage('jpg', opts)} onExportMindmapPng={opts => exportImage('png', opts)} onExportMindmapPdf={opts => exportImage('pdf', opts)}>
+      <ErrorBanner message={viewError || upload.error} onDismiss={() => { setViewError(null); upload.clearError(); }} />
+      {upload.isProcessing ? <LoadingOverlay message={upload.progressMsg || 'Processing recording...'} /> : !hasContent && (
         <div className="empty-state-wrapper flex flex-col items-center justify-center h-full">
-          <ErrorBanner message={error} onDismiss={reset} />
-          <DropZone onFileSelect={handleFileSelect} />
+          {loading ? <p role="status">Restoring your session...</p> : <DropZone onFileSelect={onFileSelect} />}
         </div>
       )}
-
-      {/* ── Loading ── */}
-      {isProcessing && (
-        <LoadingOverlay message={progressMsg || 'Analyzing audio with Gemini…'} />
-      )}
-
-      {/* ── Content views ── */}
-      {hasContent && (
-        <div className="flex flex-col h-full">
-          {/* Cloud upload background indicator */}
-          {cloudUploadProgress && (
-            <div style={{
-              background: 'linear-gradient(90deg, rgba(99,102,241,0.15), rgba(139,92,246,0.15))',
-              borderBottom: '1px solid rgba(99,102,241,0.25)',
-              padding: '6px 16px',
-              fontSize: '12px',
-              color: 'rgba(165,180,252,0.9)',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '8px',
-              flexShrink: 0,
-            }}>
-              <span style={{ animation: 'spin 1.2s linear infinite', display: 'inline-block' }}>⟳</span>
-              {cloudUploadProgress}
+      {hasContent && <div className="flex flex-col h-full">
+        {upload.cloudUploadProgress && <p role="status">{upload.cloudUploadProgress}</p>}
+        <div className="flex-1 overflow-hidden relative">
+            <div id="mindmap-tab-pane" className={`h-full w-full ${activeTab === 'mindmap' ? 'block relative z-0' : 'absolute inset-0 invisible pointer-events-none -z-10'}`}>
+              <Suspense fallback={<p role="status" className="p-5">Loading mindmap...</p>}>
+              <ErrorBoundary key={`map-${active.id}`} title="Mindmap failed to display"><MindmapViewer markdown={active.markdown} /></ErrorBoundary>
+              </Suspense>
             </div>
-          )}
-          <div className="flex-1 overflow-hidden relative">
-            {/* Mindmap Tab View - Kept mounted and measured in background for instant switching & export readiness */}
-            <div
-              id="mindmap-tab-pane"
-              className={`h-full w-full ${activeTab === 'mindmap' ? 'block relative z-0' : 'absolute inset-0 invisible pointer-events-none -z-10'}`}
-            >
-              <ErrorBoundary title="Mindmap failed to display">
-                <MindmapViewer markdown={activeMarkdown} />
+            {editorOpened && <div className={`h-full w-full overflow-y-auto p-5 ${activeTab === 'editor' ? 'block relative z-0' : 'absolute inset-0 invisible pointer-events-none -z-10'}`}>
+              <Suspense fallback={<p role="status">Loading editor...</p>}>
+              <ErrorBoundary key={`editor-${active.id}`} title="Notes editor encountered an error">
+                <MarkdownEditor lectureId={active.id} markdown={active.markdown} notes={active.notes ?? active.markdown} syncStatus={active.syncStatus}
+                  onContentChange={(_html, raw) => { dirty.current = true; setActive(current => ({ ...current, notes: raw })); }} onSave={saveNotes} />
               </ErrorBoundary>
-            </div>
-
-            {/* Note Editor Tab View - Kept mounted to preserve scroll & cursor */}
-            <div
-              className={`h-full w-full overflow-y-auto p-5 ${activeTab === 'editor' ? 'block relative z-0' : 'absolute inset-0 invisible pointer-events-none -z-10'}`}
-            >
-              <ErrorBoundary title="Notes editor encountered an error">
-                <MarkdownEditor
-                  markdown={activeMarkdown}
-                  notes={activeNotes}
-                  onContentChange={(_html, rawMd) => setCustomNotes(rawMd)}
-                  onSave={handleNotesSave}
-                />
-              </ErrorBoundary>
-            </div>
-
-            {/* Transcript Tab View */}
-            {activeTab === 'transcript' && (
-              <div className="h-full overflow-y-auto p-5">
-                <TranscriptViewer transcript={activeTranscript} />
-              </div>
-            )}
-
-            {/* Global Floating Lecture Audio/Video Player & Transcript (persists across all tabs) */}
-            <MindmapAudioWidget
-              audioUrl={activeAudioUrl}
-              transcript={activeTranscript}
-              title={activeTitle}
-              isVideo={activeIsVideo}
-            />
-
-            <GoogleDocsExportModal
-              isOpen={isDocsModalOpen}
-              onClose={() => setIsDocsModalOpen(false)}
-              content={activeNotes || activeMarkdown}
-              title={activeTitle || 'Lecture Notes'}
-            />
-          </div>
+              </Suspense>
+            </div>}
+            <Suspense fallback={null}>
+            <MindmapAudioWidget lectureId={active.id} audioUrl={audioUrl} transcript={active.transcript || []} title={active.title} isVideo={Boolean(active.isVideo)} />
+            {docsOpen && <GoogleDocsExportModal isOpen onClose={() => setDocsOpen(false)} content={active.notes ?? active.markdown} title={active.title} />}
+            </Suspense>
         </div>
-      )}
+      </div>}
     </Layout>
   );
 }

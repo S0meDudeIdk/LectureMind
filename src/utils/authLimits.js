@@ -11,7 +11,11 @@ export const LOGGED_IN_MAX_FILE_SIZE_BYTES = 500 * 1024 * 1024;
  * @returns {boolean}
  */
 export function isAnonymous(user) {
-  return !user || typeof user.uid !== 'string' || user.uid.length === 0;
+  return !user || user.isAnonymous === true || typeof user.uid !== 'string' || user.uid.length === 0;
+}
+
+export function getOwnerScope(user) {
+  return user?.uid && typeof user.uid === 'string' ? user.uid : 'guest';
 }
 
 /**

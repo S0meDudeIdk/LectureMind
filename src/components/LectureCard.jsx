@@ -1,3 +1,4 @@
+import { copyText } from '../utils/clipboard';
 import { useState, useRef, useEffect } from 'react';
 import { 
   FileAudio, 
@@ -25,6 +26,7 @@ export default function LectureCard({
   const [isEditing, setIsEditing] = useState(false);
   const [editTitle, setEditTitle] = useState(title || '');
   const [copied, setCopied] = useState(false);
+  const [copyError, setCopyError] = useState(null);
   const menuRef = useRef(null);
   const inputRef = useRef(null);
 
@@ -71,10 +73,10 @@ export default function LectureCard({
     setIsEditing(false);
   };
 
-  const handleCopyMarkdown = (e) => {
+  const handleCopyMarkdown = async (e) => {
     e.stopPropagation();
     if (markdown) {
-      navigator.clipboard.writeText(markdown);
+      try { await copyText(markdown); setCopyError(null); } catch (error) { setCopyError(error.message); return; }
       setCopied(true);
       setTimeout(() => {
         setCopied(false);
@@ -120,13 +122,15 @@ export default function LectureCard({
         if (!isEditing) onClick?.();
       }}
       onKeyDown={(e) => {
-        if (e.key === 'Enter' && !isEditing) onClick?.();
+        if (e.target !== e.currentTarget || isEditing) return;
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick?.(); }
       }}
       style={active ? activeStyle : inactiveStyle}
       className="group relative w-full text-left p-2.5 rounded-lg border transition-all cursor-pointer select-none"
       onMouseEnter={e => { if (!active) { e.currentTarget.style.backgroundColor = 'var(--color-surface-overlay)'; } }}
       onMouseLeave={e => { if (!active) { e.currentTarget.style.backgroundColor = 'transparent'; } }}
     >
+      {copyError && <p role="alert" className="text-xs text-rose-500">{copyError}</p>}
       <div className="flex items-start justify-between gap-2">
         <div className="flex items-center gap-2 flex-1 min-w-0">
           <FileAudio

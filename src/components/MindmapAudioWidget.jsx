@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
+import { copyText } from '../utils/clipboard';
 import {
   Play,
   Pause,
@@ -25,6 +26,7 @@ import {
 function parseTimestampToSeconds(ts) {
   if (!ts || typeof ts !== 'string') return 0;
   const parts = ts.trim().split(':').map(Number);
+  if (parts.some(part => !Number.isFinite(part) || part < 0)) return 0;
   if (parts.length === 2) {
     return (parts[0] || 0) * 60 + (parts[1] || 0);
   }
@@ -50,12 +52,13 @@ function formatSeconds(sec) {
 const SPEED_OPTIONS = [0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0];
 
 export default function MindmapAudioWidget({
+  lectureId,
   audioUrl,
   transcript = [],
   isVideo = false
 }) {
   const mediaRef = useRef(null);
-  const synthTimerRef = useRef(null);
+  const [mediaError, setMediaError] = useState(null);
   const speedMenuRef = useRef(null);
 
   const [isPlaying, setIsPlaying] = useState(false);
@@ -76,7 +79,7 @@ export default function MindmapAudioWidget({
 
   // Calculate approximate duration from transcript chunks if no audio file metadata is loaded yet
   const estimatedDuration = useMemo(() => {
-    if (chunks.length === 0) return 180; // 3 min default
+    if (chunks.length === 0) return 0;
     const lastChunk = chunks[chunks.length - 1];
     const lastSec = parseTimestampToSeconds(lastChunk?.startTime);
     return Math.max(lastSec + 35, 60);
@@ -121,26 +124,20 @@ export default function MindmapAudioWidget({
     };
   }, [isPlaying, audioUrl]);
 
-  // Fallback synthetic playback loop if no real audioUrl stream is active
   useEffect(() => {
-    if (!audioUrl && isPlaying) {
-      synthTimerRef.current = setInterval(() => {
-        setCurrentTime((prev) => {
-          if (prev >= effectiveDuration) {
-            setIsPlaying(false);
-            return 0;
-          }
-          return prev + 0.25 * playbackRate;
-        });
-      }, 250);
-    } else {
-      if (synthTimerRef.current) clearInterval(synthTimerRef.current);
-    }
+    setIsPlaying(false);
+    setCurrentTime(0);
+    setDuration(0);
+    setTranscriptSearch('');
+    setMediaError(null);
+  }, [lectureId, audioUrl]);
 
-    return () => {
-      if (synthTimerRef.current) clearInterval(synthTimerRef.current);
-    };
-  }, [audioUrl, isPlaying, effectiveDuration, playbackRate]);
+  useEffect(() => {
+    if (!mediaRef.current) return;
+    mediaRef.current.playbackRate = playbackRate;
+    mediaRef.current.volume = volume;
+    mediaRef.current.muted = isMuted;
+  }, [audioUrl, isVideo, playbackRate, volume, isMuted]);
 
   // Play / Pause toggle
   const togglePlay = () => {
@@ -149,12 +146,12 @@ export default function MindmapAudioWidget({
         mediaRef.current.pause();
         setIsPlaying(false);
       } else {
-        mediaRef.current.play().then(() => setIsPlaying(true)).catch(() => {
-          setIsPlaying(true);
+        setMediaError(null);
+        mediaRef.current.play().catch(error => {
+          setIsPlaying(false);
+          setMediaError(error.message || 'Recording could not be played.');
         });
       }
-    } else {
-      setIsPlaying((prev) => !prev);
     }
   };
 
@@ -165,10 +162,12 @@ export default function MindmapAudioWidget({
   };
 
   const seekTo = (seconds) => {
-    setCurrentTime(seconds);
-    if (audioUrl && mediaRef.current) {
-      mediaRef.current.currentTime = seconds;
-    }
+    if (!audioUrl || !Number.isFinite(seconds)) return;
+    const time = Math.max(0, Math.min(seconds, effectiveDuration));
+    try {
+      if (mediaRef.current) mediaRef.current.currentTime = time;
+      setCurrentTime(time);
+    } catch (error) { setMediaError(error.message || 'Could not seek this recording.'); }
   };
 
   const handleSliderChange = (e) => {
@@ -208,12 +207,12 @@ export default function MindmapAudioWidget({
     }
   };
 
-  const handleCopyTranscript = () => {
+  const handleCopyTranscript = async () => {
     const fullText = chunks
       .map((c) => `[${c.startTime || '00:00'}] ${c.textBlock}`)
       .join('\n\n');
     if (fullText) {
-      navigator.clipboard.writeText(fullText);
+      try { await copyText(fullText); } catch (error) { setMediaError(error.message); return; }
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     }
@@ -244,8 +243,7 @@ export default function MindmapAudioWidget({
   const progressPercent = Math.min(100, (currentTime / (effectiveDuration || 1)) * 100);
   const volumePercent = isMuted ? 0 : volume * 100;
 
-  if (isMinimized) {
-    return (
+  const minimizedView = isMinimized ? (
       <aside
         aria-label="Lecture Media Player & Transcript (Minimized)"
         className="absolute top-4 right-4 z-20 pointer-events-auto select-none"
@@ -272,13 +270,15 @@ export default function MindmapAudioWidget({
           <ArrowsOutSimple size={13} style={{ color: 'var(--color-text-muted)' }} />
         </button>
       </aside>
-    );
-  }
+    ) : null;
 
   return (
+    <>
+    {minimizedView}
     <aside
       aria-label="Lecture Media Player & Transcript"
-      className={`absolute top-4 right-4 z-20 w-[350px] max-w-[calc(100vw-2.5rem)] rounded-xl border shadow-2xl backdrop-blur-md flex flex-col pointer-events-auto select-none transition-all duration-200 ${
+      hidden={isMinimized}
+      className={`${isMinimized ? 'hidden' : ''} absolute top-4 right-4 z-20 w-[350px] max-w-[calc(100vw-2.5rem)] rounded-xl border shadow-2xl backdrop-blur-md flex flex-col pointer-events-auto select-none transition-all duration-200 ${
         isTranscriptExpanded ? 'bottom-4' : ''
       }`}
       style={{
@@ -326,6 +326,7 @@ export default function MindmapAudioWidget({
               playsInline
               className="w-full h-full object-contain cursor-pointer"
               onClick={togglePlay}
+              onError={() => { setIsPlaying(false); setMediaError('Recording unavailable or unsupported.'); }}
               onTimeUpdate={(e) => setCurrentTime(e.currentTarget.currentTime)}
               onLoadedMetadata={(e) => {
                 if (e.currentTarget.duration && !isNaN(e.currentTarget.duration)) {
@@ -353,6 +354,7 @@ export default function MindmapAudioWidget({
               src={audioUrl}
               preload="metadata"
               className="hidden"
+              onError={() => { setIsPlaying(false); setMediaError('Recording unavailable or unsupported.'); }}
               onTimeUpdate={(e) => setCurrentTime(e.currentTarget.currentTime)}
               onLoadedMetadata={(e) => {
                 if (e.currentTarget.duration && !isNaN(e.currentTarget.duration)) {
@@ -374,11 +376,15 @@ export default function MindmapAudioWidget({
           )
         )}
 
+        {!audioUrl && <p role="status" className="text-xs text-text-muted">Recording unavailable</p>}
+        {mediaError && <p role="alert" className="text-xs text-rose-500">{mediaError}</p>}
         {/* Progress Bar & Slider */}
         <div className="flex flex-col gap-1">
           <div className="relative flex items-center group cursor-pointer py-0.5">
             <input
               type="range"
+              aria-label="Recording position"
+              disabled={!audioUrl || !!mediaError}
               min="0"
               max={effectiveDuration || 100}
               step="0.5"
@@ -429,6 +435,7 @@ export default function MindmapAudioWidget({
             {/* Volume slider */}
             <div className="w-14 flex items-center py-1">
               <input
+                aria-label="Volume"
                 type="range"
                 min="0"
                 max="1"
@@ -450,6 +457,7 @@ export default function MindmapAudioWidget({
             <div className="flex items-center gap-2 pointer-events-auto">
               {/* -10s */}
               <button
+                disabled={!audioUrl}
                 onClick={() => handleSeekOffset(-10)}
                 title="Rewind 10 seconds"
                 className="w-7 h-7 flex items-center justify-center rounded-lg transition-all cursor-pointer"
@@ -467,6 +475,7 @@ export default function MindmapAudioWidget({
               {/* Play / Pause button */}
               <button
                 onClick={togglePlay}
+                disabled={!audioUrl}
                 title={isPlaying ? 'Pause' : 'Play'}
                 className="w-8 h-8 flex items-center justify-center rounded-full text-white shadow-md transition-transform hover:scale-105 active:scale-95 cursor-pointer"
                 style={{ backgroundColor: '#6366F1' }}
@@ -480,6 +489,7 @@ export default function MindmapAudioWidget({
 
               {/* +10s */}
               <button
+                disabled={!audioUrl}
                 onClick={() => handleSeekOffset(10)}
                 title="Forward 10 seconds"
                 className="w-7 h-7 flex items-center justify-center rounded-lg transition-all cursor-pointer"
@@ -683,8 +693,10 @@ export default function MindmapAudioWidget({
                   const isCurrent = activeChunkIndex === idx && !transcriptSearch;
 
                   return (
-                    <div
+                    <button
+                      type="button"
                       key={idx}
+                      disabled={!audioUrl}
                       onClick={() => seekTo(chunkSec)}
                       title={`Click to seek audio to ${chunk.startTime || '00:00'}`}
                       className="p-2.5 rounded-xl text-left transition-all cursor-pointer group"
@@ -727,7 +739,7 @@ export default function MindmapAudioWidget({
                       >
                         {chunk.textBlock}
                       </p>
-                    </div>
+                    </button>
                   );
                 })
               )}
@@ -736,5 +748,6 @@ export default function MindmapAudioWidget({
         )}
       </div>
     </aside>
+    </>
   );
 }

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   X,
   GoogleLogo,
@@ -11,10 +11,36 @@ import { exportToDocsViaClipboard, exportToGoogleDriveDirect } from '../utils/ex
 import { useAuth, getStoredDriveToken } from '../services/auth';
 
 export default function GoogleDocsExportModal({ isOpen, onClose, content, title = 'Lecture Notes' }) {
-  const { user, signInWithGoogle, driveToken } = useAuth();
+  const { user: authUser, signInWithGoogle, authorizeDrive, driveToken } = useAuth();
+  const user = authUser && !authUser.isAnonymous ? authUser : null;
   const [isExporting, setIsExporting] = useState(false);
   const [successMsg, setSuccessMsg] = useState(null);
   const [errorMsg, setErrorMsg] = useState(null);
+  const [createdUrl, setCreatedUrl] = useState(null);
+
+  const dialogRef = useRef(null);
+  const closeRef = useRef(onClose);
+  useEffect(() => { closeRef.current = onClose; }, [onClose]);
+  useEffect(() => {
+    if (!isOpen) return;
+    setSuccessMsg(null);
+    setCreatedUrl(null);
+    setErrorMsg(null);
+    const previous = document.activeElement;
+    const dialog = dialogRef.current;
+    dialog?.querySelector('button')?.focus();
+    const handleKey = event => {
+      if (event.key === 'Escape') { event.preventDefault(); closeRef.current(); }
+      if (event.key !== 'Tab') return;
+      const focusable = Array.from(dialog?.querySelectorAll('button:not(:disabled), a[href], input:not(:disabled), [tabindex="0"]') || []);
+      const first = focusable[0]; const last = focusable.at(-1);
+      if (!first) { event.preventDefault(); dialog?.focus(); return; }
+      if (event.shiftKey && (document.activeElement === first || !dialog.contains(document.activeElement))) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && (document.activeElement === last || !dialog.contains(document.activeElement))) { event.preventDefault(); first.focus(); }
+    };
+    document.addEventListener('keydown', handleKey);
+    return () => { document.removeEventListener('keydown', handleKey); if (previous?.isConnected) previous.focus(); };
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -23,7 +49,8 @@ export default function GoogleDocsExportModal({ isOpen, onClose, content, title 
     setErrorMsg(null);
     try {
       await exportToDocsViaClipboard(content, title);
-      setSuccessMsg('Formatted notes copied to clipboard! Paste (Ctrl+V) in your new Google Doc tab.');
+      setCreatedUrl('https://docs.new');
+      setSuccessMsg('Formatted notes copied. Open a Google Doc and paste (Ctrl+V). Equations remain readable LaTeX text.');
     } catch (err) {
       console.error(err);
       setErrorMsg('Failed to copy to clipboard: ' + (err.message || 'Unknown error'));
@@ -37,21 +64,25 @@ export default function GoogleDocsExportModal({ isOpen, onClose, content, title 
     setErrorMsg(null);
     setSuccessMsg(null);
     try {
+      if (!user) {
+        await signInWithGoogle();
+        setSuccessMsg('Signed in. Choose Authorize Google Drive & Export to grant document access.');
+        return;
+      }
       let token = driveToken || getStoredDriveToken();
       if (!user || !token) {
-        const signInResult = await signInWithGoogle();
-        token = signInResult?.token || getStoredDriveToken();
+        const authorization = await authorizeDrive();
+        token = authorization?.token || getStoredDriveToken();
       }
 
       if (!token) {
         throw new Error('Google sign-in did not return a Drive access token. Please try again.');
       }
 
-      await exportToGoogleDriveDirect(content, title, token);
+      const document = await exportToGoogleDriveDirect(content, title, token);
+      setCreatedUrl(document.url);
       setSuccessMsg('Document successfully created on your Google Drive!');
-      setTimeout(() => {
-        onClose();
-      }, 1800);
+
     } catch (err) {
       console.error(err);
       setErrorMsg(err.message || 'Google Drive export failed. You can use 1-Click Instant Export below.');
@@ -63,12 +94,18 @@ export default function GoogleDocsExportModal({ isOpen, onClose, content, title 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-150">
       <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="google-docs-export-title"
+        tabIndex={-1}
         className="w-full max-w-lg rounded-2xl border border-border shadow-2xl p-6 relative overflow-hidden"
         style={{ backgroundColor: 'var(--color-surface)' }}
       >
         {/* Close Button */}
         <button
           onClick={onClose}
+          aria-label="Close Google Docs export"
           className="absolute top-4 right-4 p-1.5 rounded-lg text-text-muted hover:text-text hover:bg-surface-overlay transition-colors cursor-pointer"
         >
           <X size={18} weight="bold" />
@@ -80,25 +117,26 @@ export default function GoogleDocsExportModal({ isOpen, onClose, content, title 
             <GoogleLogo size={22} weight="bold" />
           </div>
           <div>
-            <h3 className="font-bold text-base text-text">Export to Google Docs</h3>
-            <p className="text-xs text-text-muted">Transfer your lecture notes, equations, and tables seamlessly</p>
+            <h3 id="google-docs-export-title" className="font-bold text-base text-text">Export to Google Docs</h3>
+            <p className="text-xs text-text-muted">Direct exports include equation images. Clipboard exports preserve LaTeX text.</p>
           </div>
         </div>
 
         {/* Success / Error alerts */}
         {successMsg && (
-          <div className="mb-4 p-3 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 text-xs flex items-start gap-2">
+          <div role="status" className="mb-4 p-3 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 text-xs flex items-start gap-2">
             <CheckCircle size={16} weight="fill" className="shrink-0 mt-0.5" />
             <span>{successMsg}</span>
           </div>
         )}
 
         {errorMsg && (
-          <div className="mb-4 p-3 rounded-xl bg-rose-500/15 border border-rose-500/30 text-rose-400 text-xs">
+          <div role="alert" className="mb-4 p-3 rounded-xl bg-rose-500/15 border border-rose-500/30 text-rose-400 text-xs">
             {errorMsg}
           </div>
         )}
 
+        {createdUrl && <a href={createdUrl} target="_blank" rel="noreferrer" className="block mb-4 text-sm underline text-primary-light">Open Google document</a>}
         {/* Options */}
         <div className="space-y-3 mb-5">
           {/* Method 1: Direct Google Drive Cloud Sync */}
@@ -133,7 +171,7 @@ export default function GoogleDocsExportModal({ isOpen, onClose, content, title 
                 className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-xs font-semibold rounded-lg transition-colors flex items-center gap-1.5 cursor-pointer shadow-sm"
               >
                 <GoogleLogo size={15} weight="bold" />
-                <span>{user ? 'Upload to My Drive' : 'Sign in with Google & Export'}</span>
+                <span>{!user ? 'Sign in with Google' : driveToken ? 'Upload to My Drive' : 'Authorize Google Drive & Export'}</span>
               </button>
             </div>
           </div>
@@ -155,7 +193,7 @@ export default function GoogleDocsExportModal({ isOpen, onClose, content, title 
                 </span>
               </div>
               <p className="text-xs text-text-muted mt-1 leading-relaxed">
-                Copies rich-formatted HTML to clipboard and opens <code className="text-primary-light font-mono">docs.new</code>. Just press <kbd className="px-1.5 py-0.5 bg-surface rounded border border-border text-[11px] font-mono">Ctrl+V</kbd> to paste!
+                Copies formatted notes with readable LaTeX equations to clipboard and opens <code className="text-primary-light font-mono">docs.new</code>. Just press <kbd className="px-1.5 py-0.5 bg-surface rounded border border-border text-[11px] font-mono">Ctrl+V</kbd> to paste!
               </p>
             </div>
             <ArrowSquareOut size={18} className="text-text-muted group-hover:text-primary transition-colors shrink-0 mt-1" />

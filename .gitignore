@@ -41,3 +41,5 @@ npm-debug.log*
 coverage/
 
 .tmp/
+
+docs/

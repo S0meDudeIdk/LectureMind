@@ -1,278 +1,83 @@
-import { useState } from 'react';
-import { generateLectureContent, generateLectureContentFromUpload } from '../services/gemini';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { generateLectureContent, cancelGeneration, resolveMimeType } from '../services/gemini';
 import { saveMindmap, updateMindmap, extractTitleFromMarkdown } from '../services/db';
 import { saveMediaToLocalDb } from '../services/mediaDb';
 import { uploadMediaToCloud } from '../services/storage';
-import { extractAudioFromVideo } from '../services/audioExtractor';
-import { isAnonymous } from '../utils/authLimits';
+import { getMaxFileSizeBytes, isAnonymous } from '../utils/authLimits';
+import { validateMedia } from '../../shared/lectureContract.js';
 
-export function useAudioUpload({ user, canGenerate, incrementGeneration } = {}) {
+export function useAudioUpload({ user, canGenerate, incrementGeneration, onRecord } = {}) {
   const [isProcessing, setIsProcessing] = useState(false);
-  const [progressMsg, setProgressMsg] = useState("");
+  const [progressMsg, setProgressMsg] = useState('');
   const [error, setError] = useState(null);
-  const [markdown, setMarkdown] = useState("");
-  const [notes, setNotes] = useState("");
-  const [transcript, setTranscript] = useState([]);
-  const [audioUrl, setAudioUrl] = useState(null);
-  const [fileName, setFileName] = useState("");
-  const [mimeType, setMimeType] = useState("");
-  const [isVideo, setIsVideo] = useState(false);
-  const [savedMindmap, setSavedMindmap] = useState(null);
   const [cloudUploadProgress, setCloudUploadProgress] = useState(null);
-
-  const processAudio = async (file) => {
-    setIsProcessing(true);
-    setError(null);
-    setProgressMsg("Starting process...");
-    setCloudUploadProgress(null);
-
+  const operation = useRef(null);
+  const recordCallback = useRef(onRecord);
+  useEffect(() => { recordCallback.current = onRecord; }, [onRecord]);
+  const reset = useCallback(() => {
+    const current = operation.current;
+    operation.current = null;
+    if (current) {
+      current.controller.abort();
+      cancelGeneration(current.jobId);
+      if (current.extracting) import('../services/audioExtractor').then(m => m.terminateFfmpeg()).catch(() => {});
+    }
+    setIsProcessing(false); setProgressMsg(''); setCloudUploadProgress(null); setError(null);
+  }, []);
+  useEffect(() => reset, [user?.uid, reset]);
+  const processAudio = async (input) => {
+    if (operation.current) throw new Error('A recording is already being processed.');
+    if (!user?.uid) throw new Error('Connect and wait for authentication before generating.');
+    const mime = resolveMimeType(input);
+    const file = mime === input.type ? input : new File([input], input.name, { type: mime });
+    validateMedia(file, getMaxFileSizeBytes(user));
+    if (canGenerate === false) throw new Error('Generation limit reached. Try again after the daily reset.');
+    const task = { controller: new AbortController(), jobId: crypto.randomUUID(), extracting: false };
+    operation.current = task;
+    const signal = task.controller.signal;
+    const check = () => { if (operation.current !== task || signal.aborted) throw new DOMException('Cancelled', 'AbortError'); };
+    const progress = msg => { if (operation.current === task) setProgressMsg(msg); };
+    const cloudProgress = msg => { if (operation.current === task) setCloudUploadProgress(msg); };
+    setIsProcessing(true); setError(null); progress('Saving recording on this device...');
+    let record;
     try {
-      if (isAnonymous(user) && canGenerate === false) {
-        throw new Error('Anonymous users are limited to 5 generations per day. Sign in for unlimited.');
+      record = await saveMindmap(file.name.replace(/\.[^/.]+$/, ''), '', `${(file.size / 1048576).toFixed(1)} MB`, {
+        fileName: file.name, fileSize: file.size, mimeType: file.type, isVideo: file.type.startsWith('video/'),
+        notes: '', transcript: [], audioUrl: null, generationStatus: 'uploading',
+      }, user);
+      check();
+      await saveMediaToLocalDb(record.id, file, { isVideo: record.isVideo, fileName: file.name, mimeType: file.type }, user);
+      check(); recordCallback.current?.(record);
+      // Upload the original video for playback; derived audio is a separate temporary asset.
+      const source = await uploadMediaToCloud(file, record.id, cloudProgress, user, { signal, kind: 'source' });
+      check();
+      record = await updateMindmap(record.id, { playbackUploadId: isAnonymous(user) ? null : source.uploadId }, user);
+      let processing = file;
+      if (record.isVideo && file.size > 50 * 1048576) {
+        progress('Extracting audio for analysis...'); task.extracting = true;
+        const extractor = await import('../services/audioExtractor');
+        check();
+        const extracted = await extractor.extractAudioFromVideo(file, fraction => progress(`Extracting audio (${Math.round(fraction * 100)}%)...`));
+        task.extracting = false; check();
+        if (extracted) processing = extracted;
       }
-
-      const fileIsVideo = file?.type?.startsWith('video/') || /\.(mp4|mov|webm|mkv)$/i.test(file?.name || '');
-      setIsVideo(fileIsVideo);
-      setMimeType(file?.type || "");
-
-      // 1. Instant local blob URL for immediate playback
-      let blobUrl = null;
-      if (file) {
-        try {
-          blobUrl = URL.createObjectURL(file);
-          setAudioUrl(blobUrl);
-          setFileName(file.name || "Lecture Media");
-
-          // Cache in IndexedDB immediately (same-device fast reload)
-          saveMediaToLocalDb(file.name, file, {
-            isVideo: fileIsVideo,
-            fileName: file.name,
-            mimeType: file.type,
-          });
-        } catch {
-          // ignore
-        }
-      }
-
-      // 2. Save skeleton mindmap record immediately (local-only for anonymous users)
-      const fileTitle = file.name ? file.name.replace(/\.[^/.]+$/, "") : "Lecture Mindmap";
-      const fileSizeMB = (file.size / (1024 * 1024)).toFixed(1);
-
-      let saved = null;
-      try {
-        saved = await saveMindmap(fileTitle, '', `${fileSizeMB} MB`, {
-          fileName: file.name,
-          fileSize: file.size,
-          mimeType: file.type,
-          isVideo: fileIsVideo,
-          audioUrl: null,
-          notes: '',
-          transcript: [],
-        }, user);
-        setSavedMindmap(saved);
-      } catch (saveErr) {
-        console.warn("Initial mindmap save failed:", saveErr);
-      }
-
-      // For large video files, extract the audio track to reduce upload size
-      // and improve processing reliability. Fallback to original video if extraction fails.
-      const LARGE_VIDEO_THRESHOLD_BYTES = 50 * 1024 * 1024;
-      const shouldExtractAudio = fileIsVideo && file.size > LARGE_VIDEO_THRESHOLD_BYTES;
-      let processingFile = file;
-
-      if (shouldExtractAudio) {
-        setProgressMsg('Extracting audio track from video...');
-        try {
-          const extractedAudio = await extractAudioFromVideo(file, (progress) => {
-            const pct = Math.round(progress * 100);
-            setProgressMsg(`Extracting audio track (${pct}%)...`);
-          });
-
-          if (extractedAudio) {
-            processingFile = extractedAudio;
-            setProgressMsg('Audio extraction complete.');
-          } else {
-            setProgressMsg('Audio extraction unavailable, using original video...');
-          }
-        } catch (extractErr) {
-          console.warn('[useAudioUpload] Audio extraction failed:', extractErr);
-          setProgressMsg('Audio extraction failed, using original video...');
-        }
-      }
-
-      let cleanMarkdown = '';
-      let cleanNotes = '';
-      let transcriptChunks = [];
-
-      if (isAnonymous(user)) {
-        // 3a. Anonymous path: upload to temporary cloud storage via signed URL,
-        // analyze with Vertex AI, and clean up temporary storage object.
-        let cloudUploadResult = null;
-        try {
-          cloudUploadResult = await uploadMediaToCloud(processingFile, 'anon-' + Date.now(), (msg) => {
-            setCloudUploadProgress(msg);
-          }, user);
-        } catch (storageErr) {
-          console.warn('[useAudioUpload] Anonymous cloud upload notice:', storageErr);
-        } finally {
-          setCloudUploadProgress(null);
-        }
-
-        if (cloudUploadResult?.gsUri) {
-          const aiAnalysisPromise = generateLectureContent(processingFile, (msg) => setProgressMsg(msg), {
-            gsUri: cloudUploadResult.gsUri,
-            originalIsVideo: fileIsVideo,
-          });
-
-          const result = await aiAnalysisPromise;
-          cleanMarkdown = result.markdown;
-          cleanNotes = result.notes || result.markdown;
-          transcriptChunks = result.transcript || [];
-
-          // Clean up staged temporary media in background
-          fetch('/api/delete-media', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ gsUri: cloudUploadResult.gsUri }),
-          }).catch(() => {});
-        } else {
-          // Fallback to upload endpoint
-          const aiAnalysisPromise = generateLectureContentFromUpload(processingFile, (msg) => setProgressMsg(msg), {
-            originalIsVideo: fileIsVideo,
-          });
-
-          const result = await aiAnalysisPromise;
-          cleanMarkdown = result.markdown;
-          cleanNotes = result.notes || result.markdown;
-          transcriptChunks = result.transcript || [];
-        }
-
-        incrementGeneration?.();
-      } else {
-        // 3b. Logged-in path: upload media to Cloud Storage via signed URL and obtain the gs:// URI
-        // required by the server-side Vertex AI endpoint. If direct storage fails, fall back to chunked or server upload.
-        let cloudUploadResult = null;
-        try {
-          const cloudUploadPromise = saved?.id && processingFile
-            ? uploadMediaToCloud(processingFile, saved.id, (msg) => {
-                setCloudUploadProgress(msg);
-              }, user)
-            : Promise.resolve(null);
-
-          cloudUploadResult = await cloudUploadPromise;
-        } catch (storageErr) {
-          console.warn('[useAudioUpload] Cloud upload attempt failed, falling back to server upload:', storageErr);
-        } finally {
-          setCloudUploadProgress(null);
-        }
-
-        if (cloudUploadResult?.gsUri) {
-          const { downloadUrl, gsUri } = cloudUploadResult;
-
-          if (downloadUrl) {
-            setAudioUrl(downloadUrl);
-            if (saved?.id) {
-              updateMindmap(saved.id, { audioUrl: downloadUrl }, user).catch((e) =>
-                console.warn('[Storage] Firestore cloud URL update failed:', e)
-              );
-            }
-          }
-
-          const aiAnalysisPromise = generateLectureContent(processingFile, (msg) => setProgressMsg(msg), {
-            gsUri,
-            originalIsVideo: fileIsVideo,
-          });
-
-          const result = await aiAnalysisPromise;
-          cleanMarkdown = result.markdown;
-          cleanNotes = result.notes || result.markdown;
-          transcriptChunks = result.transcript || [];
-        } else {
-          // Fallback: upload directly to server temporary staging
-          setProgressMsg('Using direct AI upload channel...');
-          const aiAnalysisPromise = generateLectureContentFromUpload(processingFile, (msg) => setProgressMsg(msg), {
-            originalIsVideo: fileIsVideo,
-          });
-
-          const result = await aiAnalysisPromise;
-          cleanMarkdown = result.markdown;
-          cleanNotes = result.notes || result.markdown;
-          transcriptChunks = result.transcript || [];
-        }
-      }
-
-      setMarkdown(cleanMarkdown);
-      setNotes(cleanNotes || cleanMarkdown);
-      setTranscript(transcriptChunks || []);
-      setProgressMsg("");
-
-      // 4. Update mindmap record with full AI content
-      const title = extractTitleFromMarkdown(cleanMarkdown, fileTitle);
-      if (saved?.id) {
-        try {
-          await updateMindmap(saved.id, {
-            title,
-            markdown: cleanMarkdown,
-            notes: cleanNotes || cleanMarkdown,
-            transcript: transcriptChunks || [],
-          }, user);
-          setSavedMindmap((prev) => prev ? { ...prev, title, markdown: cleanMarkdown } : prev);
-        } catch (updateErr) {
-          console.warn("Mindmap AI content update failed:", updateErr);
-        }
-
-        // 5. Save to IndexedDB under all keys for fast same-device reload
-        try {
-          await saveMediaToLocalDb(saved.id, file, { isVideo: fileIsVideo, fileName: file.name, mimeType: file.type });
-          if (title) await saveMediaToLocalDb(title, file, { isVideo: fileIsVideo, fileName: file.name, mimeType: file.type });
-        } catch {
-          // non-fatal
-        }
-      }
-
-      return cleanMarkdown;
-    } catch (err) {
-      console.error(err);
-      setError(err.message || "An error occurred during media processing.");
-      throw err;
+      const analysis = processing === file ? source : await uploadMediaToCloud(processing, record.id, cloudProgress, user, { signal, kind: 'processing' });
+      check(); setCloudUploadProgress(null);
+      record = await updateMindmap(record.id, { generationStatus: 'processing' }, user);
+      const result = await generateLectureContent(processing, progress, { uploadId: analysis.uploadId, jobId: task.jobId, signal, originalIsVideo: processing.type.startsWith('video/') });
+      check();
+      record = await updateMindmap(record.id, { ...result, title: extractTitleFromMarkdown(result.markdown, record.title), generationStatus: 'complete' }, user);
+      check(); recordCallback.current?.(record); incrementGeneration?.();
+      return record;
+    } catch (failure) {
+      const cancelled = operation.current !== task || signal.aborted || failure.name === 'AbortError';
+      if (record) await updateMindmap(record.id, { generationStatus: cancelled ? 'cancelled' : 'failed' }, user).catch(() => {});
+      if (cancelled) throw new DOMException('Cancelled', 'AbortError');
+      if (operation.current === task) setError(failure.message || 'Recording processing failed.');
+      throw failure;
     } finally {
-      setIsProcessing(false);
+      if (operation.current === task) { operation.current = null; setIsProcessing(false); setProgressMsg(''); setCloudUploadProgress(null); }
     }
   };
-
-  const reset = () => {
-    if (audioUrl && audioUrl.startsWith('blob:')) {
-      URL.revokeObjectURL(audioUrl);
-    }
-    setMarkdown("");
-    setNotes("");
-    setTranscript([]);
-    setAudioUrl(null);
-    setFileName("");
-    setMimeType("");
-    setIsVideo(false);
-    setSavedMindmap(null);
-    setError(null);
-    setCloudUploadProgress(null);
-  };
-
-  return { 
-    processAudio, 
-    isProcessing, 
-    progressMsg,
-    cloudUploadProgress,
-    error, 
-    markdown, 
-    notes,
-    setNotes,
-    transcript,
-    setTranscript,
-    audioUrl,
-    setAudioUrl,
-    fileName,
-    mimeType,
-    isVideo,
-    savedMindmap,
-    reset 
-  };
+  return { processAudio, isProcessing, progressMsg, cloudUploadProgress, error, reset, clearError: () => setError(null) };
 }

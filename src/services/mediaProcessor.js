@@ -4,7 +4,7 @@
  * 2. Visual slide snapshot sampling from video canvas.
  */
 
-import { initFfmpeg, getMediaDurationFfmpeg } from './audioExtractor.js';
+
 
 /** File size threshold above which ffmpeg is used for duration extraction (100 MB). */
 const FFPROBE_FALLBACK_SIZE_BYTES = 100 * 1024 * 1024;
@@ -310,6 +310,7 @@ export async function getMediaDuration(file) {
   }
 
   try {
+    const { initFfmpeg, getMediaDurationFfmpeg } = await import('./audioExtractor.js');
     await initFfmpeg();
     const ffmpegDuration = await getMediaDurationFfmpeg(file);
     return Number.isFinite(ffmpegDuration) && ffmpegDuration > 0 ? ffmpegDuration : 0;

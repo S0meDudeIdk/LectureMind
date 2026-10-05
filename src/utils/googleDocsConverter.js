@@ -1,14 +1,18 @@
 import { marked } from 'marked';
-import katex from 'katex';
+import { sanitizeHtml, escapeHtml } from './sanitizeHtml';
 
 /**
  * Convert Obsidian / Standard Markdown note into rich, semantic HTML
  * specially formatted with inline styles for Google Docs importing and clipboard pasting.
  */
-export function markdownToGoogleDocsHtml(markdown, title = 'Lecture Notes') {
+export function markdownToGoogleDocsHtml(markdown, title = 'Lecture Notes', { mathImages = {} } = {}) {
   if (!markdown) return '';
 
-  let processed = markdown;
+  const fenced = [];
+  let processed = markdown.replace(/```[\s\S]*?```|`[^`\n]+`/g, code => {
+    fenced.push(code);
+    return `LECTUREMINDCODEPLACEHOLDER${fenced.length - 1}END`;
+  });
 
   // 1. Process Frontmatter YAML (--- ... ---)
   processed = processed.replace(/^---\n([\s\S]+?)\n---/g, (_, yaml) => {
@@ -19,41 +23,26 @@ export function markdownToGoogleDocsHtml(markdown, title = 'Lecture Notes') {
       if (parts.length >= 2) {
         const key = parts[0].trim();
         const val = parts.slice(1).join(':').trim();
-        tableRows += `<tr><td style="padding: 4px 8px; font-weight: 600; color: #4b5563; border: 1px solid #e5e7eb; background: #f9fafb;">${key}</td><td style="padding: 4px 8px; color: #1f2937; border: 1px solid #e5e7eb;">${val}</td></tr>`;
+        tableRows += `<tr><td style="padding: 4px 8px; font-weight: 600; color: #4b5563; border: 1px solid #e5e7eb; background: #f9fafb;">${escapeHtml(key)}</td><td style="padding: 4px 8px; color: #1f2937; border: 1px solid #e5e7eb;">${escapeHtml(val)}</td></tr>`;
       }
     });
     return `<div style="margin-bottom: 20px;"><table style="border-collapse: collapse; width: 100%; font-family: Arial, sans-serif; font-size: 11pt; border: 1px solid #e5e7eb;">${tableRows}</table></div>\n\n`;
   });
 
-  // 2. Process Block Math ($$...$$)
-  processed = processed.replace(/\$\$([\s\S]+?)\$\$/g, (_, math) => {
-    const trimmed = math.trim();
-    try {
-      const rendered = katex.renderToString(trimmed, {
-        displayMode: true,
-        throwOnError: false,
-        output: 'html',
-      });
-      return `<div style="text-align: center; margin: 16px 0; padding: 12px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; font-family: 'Times New Roman', Times, serif; font-size: 13pt;">${rendered}</div>`;
-    } catch {
-      return `<div style="text-align: center; margin: 16px 0; padding: 12px; background: #f8fafc; border: 1px solid #e2e8f0; font-family: 'Courier New', Courier, monospace; font-size: 12pt;">${trimmed}</div>`;
+  // Imported documents cannot rely on the app's KaTeX stylesheet.
+  const renderMath = (math, block) => {
+    const raw = math.trim();
+    const image = mathImages[raw];
+    if (image) {
+      if (!/^https:\/\//.test(image.url)) throw new Error('Equation image requires a secure URL.');
+      const width = Number.isFinite(image.width) ? Math.min(image.width, 750) : 200;
+      const height = Number.isFinite(image.height) ? image.height : 40;
+      return `<${block ? 'div' : 'span'}><img src="${escapeHtml(image.url)}" alt="${escapeHtml(raw)}" width="${width}" height="${height}" style="width:${width}px;height:${height}px;vertical-align:middle"></${block ? 'div' : 'span'}>`;
     }
-  });
-
-  // 3. Process Inline Math ($...$)
-  processed = processed.replace(/(?<!\\|\$)\$(?!\$)(.+?)(?<!\\|\$)\$(?!\$)/g, (_, math) => {
-    const trimmed = math.trim();
-    try {
-      const rendered = katex.renderToString(trimmed, {
-        displayMode: false,
-        throwOnError: false,
-        output: 'html',
-      });
-      return `<span style="font-family: 'Times New Roman', Times, serif; font-style: italic; font-size: 11.5pt;">${rendered}</span>`;
-    } catch {
-      return `<code style="font-family: monospace; background: #f1f5f9; padding: 2px 4px; border-radius: 4px;">${trimmed}</code>`;
-    }
-  });
+    return `<${block ? 'div' : 'span'} style="font-family:monospace;white-space:pre-wrap">${escapeHtml(block ? `$$${raw}$$` : `$${raw}$`).replace(/\$/g, '&#36;')}</${block ? 'div' : 'span'}>`;
+  };
+  processed = processed.replace(/\$\$([\s\S]+?)\$\$/g, (_, math) => renderMath(math, true));
+  processed = processed.replace(/(?<!\\|\$)\$(?!\$)(.+?)(?<!\\|\$)\$(?!\$)/g, (_, math) => renderMath(math, false));
 
   // 4. Process Callouts (> [!type] Title)
   const calloutColors = {
@@ -72,7 +61,7 @@ export function markdownToGoogleDocsHtml(markdown, title = 'Lecture Notes') {
     const bodyText = body.replace(/^\s*>\s?/gm, '').trim();
 
     return `<div style="border-left: 4px solid ${config.border}; background-color: ${config.bg}; padding: 12px 16px; margin: 16px 0; border-radius: 0 8px 8px 0; font-family: Arial, sans-serif;">
-      <div style="font-weight: 700; color: #1e293b; margin-bottom: 6px; font-size: 11pt;">${headerTitle}</div>
+      <div style="font-weight: 700; color: #1e293b; margin-bottom: 6px; font-size: 11pt;">${escapeHtml(headerTitle)}</div>
       <div style="color: #334155; font-size: 10.5pt; line-height: 1.6;">${bodyText}</div>
     </div>\n\n`;
   });
@@ -86,18 +75,19 @@ export function markdownToGoogleDocsHtml(markdown, title = 'Lecture Notes') {
 
   // 7. Process Wiki-links ([[Page|Alias]])
   processed = processed.replace(/\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g, (_, target, alias) => {
-    return `<span style="color: #4f46e5; text-decoration: underline; font-weight: 500;">${alias || target}</span>`;
+    return `<span style="color: #4f46e5; text-decoration: underline; font-weight: 500;">${escapeHtml(alias || target)}</span>`;
   });
 
   // 8. Convert remaining standard Markdown to HTML with Marked
-  const parsedBody = marked.parse(processed);
+  processed = processed.replace(/LECTUREMINDCODEPLACEHOLDER(\d+)END/g, (_, index) => fenced[Number(index)]);
+  const parsedBody = sanitizeHtml(marked.parse(processed));
 
   // 9. Return complete, self-contained Google Docs styled HTML document
   return `<!DOCTYPE html>
 <html>
 <head>
 <meta charset="utf-8">
-<title>${title}</title>
+<title>${escapeHtml(title)}</title>
 <style>
   body {
     font-family: Arial, Helvetica, sans-serif;

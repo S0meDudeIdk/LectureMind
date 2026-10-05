@@ -1,6 +1,7 @@
-import { ViewPlugin, Decoration, EditorView, WidgetType } from '@codemirror/view';
-import { RangeSetBuilder, StateEffect, StateField } from '@codemirror/state';
+import { Decoration, EditorView, WidgetType } from '@codemirror/view';
+import { StateEffect, StateField } from '@codemirror/state';
 import katex from 'katex';
+import { sanitizeHtml, escapeHtml } from '../utils/sanitizeHtml';
 
 /**
  * ─────────────────────────────────────────────────────────────────────────────
@@ -28,6 +29,19 @@ export const foldedLinesField = StateField.define({
   },
   update(folded, tr) {
     let next = new Set(folded);
+    if (tr.docChanged) {
+      next = new Set(Array.from(folded, line => {
+        if (line > tr.startState.doc.lines) return null;
+        const original = tr.startState.doc.line(line);
+        let deleted = false;
+        tr.changes.iterChangedRanges((from, to) => {
+          if (to > from && from <= original.from && to >= original.to) deleted = true;
+        });
+        if (deleted) return null;
+        const pos = tr.changes.mapPos(original.from, 1);
+        return tr.newDoc.lineAt(pos).number;
+      }).filter(line => line !== null));
+    }
     for (let e of tr.effects) {
       if (e.is(toggleFoldEffect)) {
         if (next.has(e.value)) next.delete(e.value);
@@ -58,7 +72,7 @@ class PropertiesWidget extends WidgetType {
   }
 
   eq(other) {
-    return other.yamlText === this.yamlText;
+    return other.yamlText === this.yamlText && other.from === this.from && other.to === this.to;
   }
 
   toDOM(view) {
@@ -111,7 +125,7 @@ class PropertiesWidget extends WidgetType {
           const badge = document.createElement('span');
           if (key.toLowerCase() === 'tags') {
             badge.className = 'inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-primary/15 text-primary-light border border-primary/25';
-            badge.innerHTML = `<span class="opacity-60">#</span>${item.replace(/^#/, '')}`;
+            badge.innerHTML = `<span class="opacity-60">#</span>${escapeHtml(item.replace(/^#/, ''))}`;
           } else {
             badge.className = 'inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-medium bg-surface-overlay text-text border border-border/60';
             badge.textContent = item;
@@ -326,7 +340,7 @@ class KatexBlockWidget extends WidgetType {
   }
 
   eq(other) {
-    return other.latex === this.latex;
+    return other.latex === this.latex && other.from === this.from && other.to === this.to;
   }
 
   toDOM(view) {
@@ -336,7 +350,7 @@ class KatexBlockWidget extends WidgetType {
     try {
       const rendered = katex.renderToString(this.latex, {
         displayMode: true,
-        throwOnError: false,
+        throwOnError: false, trust: false,
         output: 'html'
       });
       container.innerHTML = rendered;
@@ -375,7 +389,7 @@ class KatexLiveEditPreviewWidget extends WidgetType {
   }
 
   eq(other) {
-    return other.latex === this.latex;
+    return other.latex === this.latex && other.from === this.from && other.to === this.to;
   }
 
   toDOM() {
@@ -391,7 +405,7 @@ class KatexLiveEditPreviewWidget extends WidgetType {
     try {
       mathWrap.innerHTML = katex.renderToString(this.latex, {
         displayMode: true,
-        throwOnError: false,
+        throwOnError: false, trust: false,
         output: 'html'
       });
     } catch {
@@ -417,7 +431,7 @@ class KatexInlineWidget extends WidgetType {
   }
 
   eq(other) {
-    return other.latex === this.latex;
+    return other.latex === this.latex && other.from === this.from && other.to === this.to;
   }
 
   toDOM(view) {
@@ -427,7 +441,7 @@ class KatexInlineWidget extends WidgetType {
     try {
       const rendered = katex.renderToString(this.latex, {
         displayMode: false,
-        throwOnError: false,
+        throwOnError: false, trust: false,
         output: 'html'
       });
       span.innerHTML = rendered;
@@ -490,7 +504,7 @@ class CalloutHeaderWidget extends WidgetType {
 
     header.innerHTML = `
       <span class="text-sm select-none">${cfg.icon}</span>
-      <span class="font-bold tracking-tight text-sm flex-1">${this.title}</span>
+      <span class="font-bold tracking-tight text-sm flex-1">${escapeHtml(this.title)}</span>
       ${this.isFoldable ? `<span class="callout-fold-toggle p-1 hover:bg-black/10 dark:hover:bg-white/10 rounded transition-colors text-xs opacity-70">${this.isFolded ? '▶' : '▼'}</span>` : ''}
     `;
 
@@ -567,7 +581,7 @@ class TagWidget extends WidgetType {
   toDOM() {
     const span = document.createElement('span');
     span.className = 'obsidian-tag-pill inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full text-[11px] font-medium bg-primary/15 text-primary-light border border-primary/25 mx-0.5 select-none align-middle';
-    span.innerHTML = `<span class="opacity-60">#</span><span>${this.tagText.replace(/^#/, '')}</span>`;
+    span.innerHTML = `<span class="opacity-60">#</span><span>${escapeHtml(this.tagText.replace(/^#/, ''))}</span>`;
     return span;
   }
 }
@@ -585,7 +599,7 @@ class WikiLinkWidget extends WidgetType {
   }
 
   eq(other) {
-    return other.raw === this.raw;
+    return other.raw === this.raw && other.from === this.from;
   }
 
   toDOM(view) {
@@ -601,7 +615,7 @@ class WikiLinkWidget extends WidgetType {
       displayText = `${parts[0].trim()} > ${parts[1].trim()}`;
     }
 
-    span.innerHTML = `<span class="opacity-60 text-xs">🔗</span><span>${displayText}</span>`;
+    span.innerHTML = `<span class="opacity-60 text-xs">🔗</span><span>${escapeHtml(displayText)}</span>`;
 
     span.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -626,7 +640,7 @@ class EmbedWidget extends WidgetType {
   }
 
   eq(other) {
-    return other.raw === this.raw;
+    return other.raw === this.raw && other.from === this.from;
   }
 
   toDOM(view) {
@@ -634,7 +648,7 @@ class EmbedWidget extends WidgetType {
     span.className = 'obsidian-embed-pill inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium bg-surface-overlay border border-border/80 text-text cursor-pointer hover:border-primary/50 transition-colors select-none';
     
     let target = this.raw.trim();
-    span.innerHTML = `<span class="opacity-70 text-xs">📎</span><span>${target}</span>`;
+    span.innerHTML = `<span class="opacity-70 text-xs">📎</span><span>${escapeHtml(target)}</span>`;
 
     span.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -721,7 +735,7 @@ class TableWidget extends WidgetType {
     return true;
   }
 
-  eq(other) { return other.tableText === this.tableText; }
+  eq(other) { return other.tableText === this.tableText && other.from === this.from && other.to === this.to; }
 
   toDOM(view) {
     const container = document.createElement('div');
@@ -754,19 +768,24 @@ class TableWidget extends WidgetType {
           ? 'px-4 py-2.5 font-bold text-text border-r border-border/60 last:border-0 text-xs tracking-wider uppercase' 
           : 'px-4 py-2.5 text-text/90 border-r border-border/40 last:border-0 text-sm';
         
-        let content = cell.trim()
+        const codeCells = [];
+        let content = cell.trim().replace(/`([^`]+)`/g, (_, code) => {
+          codeCells.push(code);
+          return `LECTUREMINDTABLECODE${codeCells.length - 1}END`;
+        })
           .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
           .replace(/(?<!\*)\*([^\*\n]+?)\*(?!\*)/g, '<em>$1</em>')
           .replace(/`([^`]+)`/g, '<code class="bg-surface-alt text-primary-light font-mono text-[11px] px-1.5 py-0.5 rounded border border-border/40 mx-0.5">$1</code>')
           .replace(/(?<!\\|\$)\$(?!\$)(.+?)(?<!\\|\$)\$(?!\$)/g, (_, math) => {
             try {
-              return katex.renderToString(math.trim(), { displayMode: false, throwOnError: false, output: 'html' });
+              return katex.renderToString(math.trim(), { displayMode: false, throwOnError: false, trust: false, output: 'html' });
             } catch (e) {
               return `$${math}$`;
             }
           });
 
-        el.innerHTML = content;
+        content = content.replace(/LECTUREMINDTABLECODE(\d+)END/g, (_, index) => `<code>${escapeHtml(codeCells[Number(index)])}</code>`);
+        el.innerHTML = sanitizeHtml(content);
         row.appendChild(el);
       });
       
@@ -948,6 +967,7 @@ function buildDecorations(state) {
   }
 
   // ── C. Block Math ($$...$$) across document ──
+  const inlineCodeRanges = Array.from(docText.matchAll(/`[^`\n]+`/g), match => ({ from: match.index, to: match.index + match[0].length }));
   const blockMathRegex = /\$\$([\s\S]+?)\$\$/g;
   let bMatch;
   while ((bMatch = blockMathRegex.exec(docText)) !== null) {
@@ -957,6 +977,9 @@ function buildDecorations(state) {
     const lineFrom = doc.lineAt(from).from;
     const lineTo = doc.lineAt(to > 0 && (docText[to - 1] === '\n' || docText[to - 1] === '\r') ? to - 1 : to).to;
 
+    if ([...replacedBlockRanges, ...inlineCodeRanges].some(r => from < r.to && to > r.from)) continue;
+    // Tables handle their own math; inline $$ cannot replace the whole row.
+    if (doc.lineAt(from).text.trim().startsWith('|')) continue;
     const mathContent = bMatch[1].trim();
 
     replacedBlockRanges.push({ from: lineFrom, to: lineTo });
@@ -991,6 +1014,7 @@ function buildDecorations(state) {
     }
     to = doc.lineAt(to).to;
 
+    if (replacedBlockRanges.some(r => from < r.to && to > r.from)) continue;
     replacedBlockRanges.push({ from, to });
     if (!isRangeActive(from, to)) {
       decorations.push(Decoration.replace({
@@ -1260,6 +1284,25 @@ function buildDecorations(state) {
       markOccupied(0, prefixHeading[0].length);
     }
 
+    // 9. Inline Code (`code`)
+    const codeRegex = /`([^`\n]+)`/g;
+    let cd;
+    while ((cd = codeRegex.exec(chunkText)) !== null) {
+      const cStart = cd.index;
+      const cEnd = cStart + cd[0].length;
+      if (canOccupy(cStart, cEnd)) {
+        markOccupied(cStart, cEnd);
+        const cFrom = from + cStart;
+        const cTo = from + cEnd;
+        if (!isRangeActive(cFrom, cTo)) {
+          decorations.push(Decoration.replace({}).range(cFrom, cFrom + 1));
+          decorations.push(Decoration.mark({ class: 'obsidian-inline-code bg-surface-alt text-primary-light font-mono text-[13px] px-1.5 py-0.5 rounded border border-border/40 mx-0.5' }).range(cFrom + 1, cTo - 1));
+          decorations.push(Decoration.replace({}).range(cTo - 1, cTo));
+        }
+      }
+    }
+
+
     // 1. Comments (%% comment %%) - Visible in edit/live preview mode
     const commentRegex = /%%([\s\S]*?)%%/g;
     let cm;
@@ -1391,24 +1434,6 @@ function buildDecorations(state) {
           decorations.push(Decoration.replace({
             widget: new TagWidget(tr[0]),
           }).range(tFrom, tTo));
-        }
-      }
-    }
-
-    // 9. Inline Code (`code`)
-    const codeRegex = /`([^`\n]+)`/g;
-    let cd;
-    while ((cd = codeRegex.exec(chunkText)) !== null) {
-      const cStart = cd.index;
-      const cEnd = cStart + cd[0].length;
-      if (canOccupy(cStart, cEnd)) {
-        markOccupied(cStart, cEnd);
-        const cFrom = from + cStart;
-        const cTo = from + cEnd;
-        if (!isRangeActive(cFrom, cTo)) {
-          decorations.push(Decoration.replace({}).range(cFrom, cFrom + 1));
-          decorations.push(Decoration.mark({ class: 'obsidian-inline-code bg-surface-alt text-primary-light font-mono text-[13px] px-1.5 py-0.5 rounded border border-border/40 mx-0.5' }).range(cFrom + 1, cTo - 1));
-          decorations.push(Decoration.replace({}).range(cTo - 1, cTo));
         }
       }
     }

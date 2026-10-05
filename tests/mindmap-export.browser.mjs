@@ -137,7 +137,8 @@ async function downloadAndCheck(live, theme, format, transparent, suffix = '') {
 }
 try {
   await page.goto(baseURL);
-  await page.getByText('Export Regression', { exact: true }).click();
+  await page.getByRole('button', { name: 'Recover previous local lectures' }).click();
+  await page.getByRole('button', { name: 'Import Export Regression', exact: true }).click();
   await ready();
   await page.evaluate(() => document.fonts.ready);
   await page.waitForTimeout(700); // let the existing viewer's font fallback render settle

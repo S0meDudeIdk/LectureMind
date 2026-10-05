@@ -1,8 +1,10 @@
+import { copyText } from '../utils/clipboard';
 import { useState } from 'react';
 import { Clock, Copy, Check, MagnifyingGlass, FileText } from '@phosphor-icons/react';
 
 export default function TranscriptViewer({ transcript = [] }) {
   const [copied, setCopied] = useState(false);
+  const [copyError, setCopyError] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
 
   const chunks = Array.isArray(transcript) ? transcript : [];
@@ -16,13 +18,13 @@ export default function TranscriptViewer({ transcript = [] }) {
     );
   });
 
-  const handleCopyAll = () => {
+  const handleCopyAll = async () => {
     const fullText = chunks
       .map((c) => `[${c.startTime || '00:00'}] ${c.textBlock}`)
       .join('\n\n');
     
     if (fullText) {
-      navigator.clipboard.writeText(fullText);
+      try { await copyText(fullText); setCopyError(null); } catch (error) { setCopyError(error.message); return; }
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     }
@@ -71,6 +73,7 @@ export default function TranscriptViewer({ transcript = [] }) {
         </div>
       </div>
 
+      {copyError && <p role="alert" className="px-4 text-xs text-rose-500">{copyError}</p>}
       {/* Transcript Chunks List */}
       <div className="flex-1 overflow-y-auto p-4 space-y-3 divide-y divide-border/20">
         {filteredChunks.length === 0 ? (

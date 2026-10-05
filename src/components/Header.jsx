@@ -7,14 +7,17 @@ import {
 import { useState, useRef, useEffect } from 'react';
 import { useTheme } from '../context/ThemeContext';
 import { useAuth } from '../services/auth';
+import { copyText } from '../utils/clipboard';
 import { isAnonymous } from '../utils/authLimits';
 
 /* ── Small icon button used repeatedly ── */
-function IconBtn({ onClick, title, children, style }) {
+function IconBtn({ onClick, title, children, style, ...props }) {
   return (
     <button
       onClick={onClick}
       title={title}
+      aria-label={title}
+      {...props}
       className="w-7 h-7 flex items-center justify-center rounded-md transition-all cursor-pointer"
       style={{ color: 'var(--color-text-muted)', background: 'none', ...style }}
       onMouseEnter={e => {
@@ -38,7 +41,8 @@ export default function Header({
   onExportMindmapJpg, onExportMindmapPng, onExportMindmapPdf,
 }) {
   const { theme, toggle } = useTheme();
-  const { user, signInWithGoogle, signOut, isConfigured: _isConfigured } = useAuth();
+  const { user: authUser, loading, signInWithGoogle, signOut, isConfigured: _isConfigured } = useAuth();
+  const user = authUser && !authUser.isAnonymous ? authUser : null;
   
   const [exportOpen, setExportOpen] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
@@ -72,6 +76,17 @@ export default function Header({
     }
   });
 
+  useEffect(() => {
+    const close = event => {
+      if (event.key !== 'Escape') return;
+      if (exportOpen) exportRef.current?.querySelector('button')?.focus();
+      if (accountOpen) accountRef.current?.querySelector('button')?.focus();
+      setExportOpen(false);
+      setAccountOpen(false);
+    };
+    document.addEventListener('keydown', close);
+    return () => document.removeEventListener('keydown', close);
+  }, [exportOpen, accountOpen]);
   const exportRef = useRef(null);
   const accountRef = useRef(null);
 
@@ -155,7 +170,7 @@ export default function Header({
   return (
     <>
     <header
-      className="flex items-center justify-between h-12 px-3 sticky top-0 z-40 shrink-0"
+      className="flex items-center justify-between h-12 px-1 sm:px-3 sticky top-0 z-40 shrink-0"
       style={{
         backgroundColor: 'var(--color-surface)',
         borderBottom: '1px solid var(--color-border)',
@@ -166,6 +181,9 @@ export default function Header({
 
         {/* Sidebar collapse toggle */}
         <IconBtn
+          id="sidebar-toggle"
+          aria-expanded={sidebarOpen}
+          aria-controls="lecture-sidebar"
           onClick={onToggleSidebar}
           title={sidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'}
         >
@@ -186,7 +204,7 @@ export default function Header({
         />
 
         {/* Logo */}
-        <div className="flex items-center gap-2 shrink-0 mr-4">
+        <div className="flex items-center gap-1 shrink-0 mr-1 sm:mr-4">
           <div
             className="w-6 h-6 rounded-md flex items-center justify-center"
             style={{ background: 'linear-gradient(135deg, #6366F1, #8B5CF6)' }}
@@ -194,7 +212,7 @@ export default function Header({
             <Brain weight="fill" size={13} className="text-white" />
           </div>
           <span
-            className="text-sm font-bold tracking-tight leading-none"
+            className="hidden min-[640px]:inline text-sm font-bold tracking-tight leading-none"
             style={{ color: 'var(--color-text)' }}
           >
             LectureMind
@@ -210,7 +228,9 @@ export default function Header({
                 <button
                   key={id}
                   onClick={() => setActiveTab?.(id)}
-                  className="relative flex items-center gap-1.5 px-3 h-full text-[13px] font-medium transition-colors cursor-pointer"
+                  aria-label={label}
+                  aria-pressed={isActive}
+                  className="relative flex items-center gap-1 px-1.5 sm:px-3 h-full text-[13px] font-medium transition-colors cursor-pointer"
                   style={{
                     color: isActive ? 'var(--color-text)' : 'var(--color-text-muted)',
                     background: 'none',
@@ -225,7 +245,7 @@ export default function Header({
                   }}
                 >
                   <Icon size={14} weight={isActive ? 'bold' : 'regular'} />
-                  <span>{label}</span>
+                  <span className="hidden min-[480px]:inline">{label}</span>
 
                   {/* Active underline */}
                   {isActive && (
@@ -264,7 +284,7 @@ export default function Header({
               aria-busy={isExporting}
             >
               <Export size={13} weight="bold" />
-              <span>{isExporting ? 'Exporting…' : 'Export'}</span>
+              <span className="hidden min-[375px]:inline">{isExporting ? 'Exporting…' : 'Export'}</span>
             </button>
 
             {exportOpen && (
@@ -372,6 +392,8 @@ export default function Header({
         <div className="relative" ref={accountRef}>
           <button
             onClick={() => setAccountOpen(v => !v)}
+            disabled={loading}
+            aria-label={user ? 'Account' : 'Sign in with Google'}
             title={user ? `${user.displayName || user.email} (Account)` : 'Sign in with Google'}
             className="w-7 h-7 rounded-full flex items-center justify-center transition-transform hover:scale-105 cursor-pointer overflow-hidden border border-border/80"
             style={{ backgroundColor: 'var(--color-surface-alt)' }}
@@ -470,8 +492,8 @@ export default function Header({
                             </span>
                             <button
                               type="button"
-                              onClick={() => {
-                                navigator.clipboard.writeText(authError.domain);
+                              onClick={async () => {
+                                try { await copyText(authError.domain); } catch (error) { setAuthError({ type: 'generic', message: error.message }); return; }
                                 setDomainCopied(true);
                                 setTimeout(() => setDomainCopied(false), 2000);
                               }}
@@ -525,7 +547,7 @@ export default function Header({
         <div className="flex items-center gap-2 min-w-0">
           <Lightning size={14} weight="fill" className="text-indigo-500 shrink-0" />
           <span className="truncate">
-            <strong>Sign in</strong> for unlimited generations and file uploads up to 500 MB.
+            <strong>Sign in</strong> for a higher daily generation quota, cloud sync and file uploads up to 500 MB.
           </span>
         </div>
         <button

@@ -1,0 +1,14 @@
+{
+  "indexes": [
+    { "collectionGroup": "mindmaps", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "ownerUid", "order": "ASCENDING" },
+      { "fieldPath": "createdAt", "order": "DESCENDING" }
+    ] }
+  ],
+  "fieldOverrides": [
+    { "collectionGroup": "lmJobs", "fieldPath": "deleteAfter", "ttl": true, "indexes": [] },
+    { "collectionGroup": "lmQuotas", "fieldPath": "deleteAfter", "ttl": true, "indexes": [] },
+    { "collectionGroup": "lmBudgets", "fieldPath": "deleteAfter", "ttl": true, "indexes": [] },
+    { "collectionGroup": "lmUploads", "fieldPath": "deleteAfter", "ttl": true, "indexes": [] }
+  ]
+}
