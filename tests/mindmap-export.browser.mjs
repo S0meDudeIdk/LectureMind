@@ -15,10 +15,16 @@ const { PDFDocument, PDFName } = require('pdf-lib');
 const production = process.env.EXPORT_TEST_PRODUCTION === '1';
 const output = `.tmp/export-qa/${production ? 'production' : 'development'}`;
 await mkdir(output, { recursive: true });
-if (production) await build({ logLevel: 'error', build: { outDir: '.tmp/export-test-build' } });
+// Keep fixtures in the offline guest scope even when a developer has Firebase
+// credentials in .env. Apply the same isolation to development and production.
+const define = {
+  'import.meta.env.VITE_FIREBASE_API_KEY': JSON.stringify(''),
+  'import.meta.env.VITE_FIREBASE_PROJECT_ID': JSON.stringify(''),
+};
+if (production) await build({ define, logLevel: 'error', build: { outDir: '.tmp/export-test-build' } });
 const server = production
   ? await preview({ logLevel: 'error', build: { outDir: '.tmp/export-test-build' }, preview: { host: '127.0.0.1', port: 5180, strictPort: true } })
-  : await createServer({ logLevel: 'error', server: { host: '127.0.0.1', port: 5179, strictPort: true, watch: { ignored: ['**/.tmp/**'] } } });
+  : await createServer({ define, logLevel: 'error', server: { host: '127.0.0.1', port: 5179, strictPort: true, watch: { ignored: ['**/.tmp/**'] } } });
 if (!production) await server.listen();
 const baseURL = `http://127.0.0.1:${production ? 5180 : 5179}`;
 const browser = await chromium.launch({ channel: process.env.EXPORT_TEST_BROWSER || 'chrome', headless: true });
@@ -38,12 +44,10 @@ const markdown = String.raw`# Export Regression
 ## Colored formula
 - $\textcolor{red}{x} + y$
 `;
-await context.addInitScript(({ markdown }) => {
+await context.addInitScript(() => {
   localStorage.setItem('lm-theme', 'dark');
-  localStorage.setItem('lecturemind_db_initialized_v6', 'true');
   localStorage.setItem('lecturemind_auth_nudge_dismissed', 'true');
-  localStorage.setItem('lecturemind_saved_mindmaps', JSON.stringify([{ id: 'sample-export', title: 'Export Regression', markdown, notes: markdown, transcript: [] }]));
-}, { markdown });
+});
 const page = await context.newPage();
 const pageErrors = [];
 page.on('pageerror', error => { pageErrors.push(error.message); console.error('Browser error:', error.message); });
@@ -137,8 +141,30 @@ async function downloadAndCheck(live, theme, format, transparent, suffix = '') {
 }
 try {
   await page.goto(baseURL);
-  await page.getByRole('button', { name: 'Recover previous local lectures' }).click();
-  await page.getByRole('button', { name: 'Import Export Regression', exact: true }).click();
+  await page.getByRole('button', { name: 'New Mindmap', exact: true }).waitFor();
+  // Seed the current storage format directly; export tests must not depend on
+  // the removed legacy-recovery UI. Await persistence before reloading the app.
+  await page.evaluate(({ markdown }) => new Promise((resolve, reject) => {
+    const request = indexedDB.open('lecturemind_media_db_v1', 2);
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => {
+      const database = request.result;
+      const transaction = database.transaction(['lectures', 'settings'], 'readwrite');
+      const now = new Date().toISOString();
+      transaction.objectStore('lectures').put({
+        scope: 'guest', id: 'sample-export', title: 'Export Regression',
+        markdown, notes: markdown, transcript: [], createdAt: now, updatedAt: now,
+        ownerUid: null, anonymousOwner: true, revision: 1, baseRevision: 0,
+        syncStatus: 'local-only', deleted: false,
+      });
+      transaction.objectStore('settings').put({ id: 'guest-samples-v2', initializedAt: Date.now() });
+      transaction.oncomplete = () => { database.close(); resolve(); };
+      transaction.onabort = () => { database.close(); reject(transaction.error); };
+    };
+  }), { markdown });
+  await page.reload();
+  assert.equal(await page.getByRole('button', { name: 'Recover previous local lectures' }).count(), 0);
+  await page.getByRole('button', { name: /Export Regression/ }).click();
   await ready();
   await page.evaluate(() => document.fonts.ready);
   await page.waitForTimeout(700); // let the existing viewer's font fallback render settle
