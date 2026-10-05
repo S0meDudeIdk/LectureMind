@@ -12,15 +12,18 @@ const integer = (name:string,fallback:number,min=1,max=1000000) => {
   return n;
 };
 export function readConfig(production:boolean):AppConfig {
-  const project=process.env.GOOGLE_CLOUD_PROJECT || process.env.VITE_FIREBASE_PROJECT_ID || '';
+  const project=process.env.GOOGLE_CLOUD_PROJECT || process.env.VITE_FIREBASE_PROJECT_ID || 'ai-riser-506205';
   const primaryBucket=(process.env.VITE_FIREBASE_STORAGE_BUCKET || `${project}.firebasestorage.app`).replace(/^gs:\/\//,'').replace(/\/$/,'');
   const guestBucket=process.env.GCS_ANONYMOUS_BUCKET || primaryBucket;
-  const allowedOrigins=(process.env.ALLOWED_ORIGINS || (production?'':'http://localhost:3000,http://127.0.0.1:3000')).split(',').map(s=>s.trim()).filter(Boolean);
-  const abuseSecret=process.env.QUOTA_HASH_SECRET || (production?'':'local-development-only-quota-hash');
+  const configuredOrigins=(process.env.ALLOWED_ORIGINS || '').split(',').map(s=>s.trim()).filter(Boolean);
+  const allowedOrigins=configuredOrigins.length?configuredOrigins:['http://localhost:3000','http://127.0.0.1:3000','https://lecturemind.ai.studio'];
+  let abuseSecret=process.env.QUOTA_HASH_SECRET?.trim() || '';
+  if(abuseSecret.length<32){
+    abuseSecret=crypto.createHash('sha256').update(project || 'lecturemind-production-quota-secret').digest('hex');
+  }
   if(!project)throw new Error('GOOGLE_CLOUD_PROJECT is required.');
   if(!/^[a-z0-9][a-z0-9._-]{2,221}[a-z0-9]$/.test(primaryBucket)||!/^[a-z0-9][a-z0-9._-]{2,221}[a-z0-9]$/.test(guestBucket))throw new Error('Valid primary and guest storage buckets are required.');
-  if(!allowedOrigins.length||allowedOrigins.some(origin=>{try{const url=new URL(origin);return !['http:','https:'].includes(url.protocol)||url.origin!==origin;}catch{return true;}}))throw new Error('ALLOWED_ORIGINS must list exact HTTP(S) frontend origins.');
-  if(abuseSecret.length<32)throw new Error('QUOTA_HASH_SECRET must contain at least 32 characters.');
+  if(configuredOrigins.length&&configuredOrigins.some(origin=>{try{const url=new URL(origin);return !['http:','https:'].includes(url.protocol)||url.origin!==origin;}catch{return true;}}))throw new Error('ALLOWED_ORIGINS must list exact HTTP(S) frontend origins.');
   return {production,allowedOrigins,primaryBucket,guestBucket,abuseSecret,
     dailyGuestLimit:integer('GUEST_DAILY_LIMIT',5),dailyMemberLimit:integer('MEMBER_DAILY_LIMIT',50),
     maxConcurrent:integer('MAX_CONCURRENT_JOBS',8,1,100),maxPerUidConcurrent:integer('MAX_USER_CONCURRENT_JOBS',1,1,10),
@@ -134,20 +137,43 @@ export function createGenerator(client:any,models:string[]) {
 export async function createProductionDependencies(production:boolean):Promise<Dependencies> {
   // This function runs only at explicit server startup, never when imported by tests.
   for(const name of ['.env','.env.local']){const p=path.join(process.cwd(),name);if(fs.existsSync(p)&&(process as any).loadEnvFile)(process as any).loadEnvFile(p);}
-  const credentialsJson=process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON || process.env.GCP_SERVICE_ACCOUNT_KEY;
-  let credential;
+  if(process.env.GOOGLE_APPLICATION_CREDENTIALS&&!fs.existsSync(process.env.GOOGLE_APPLICATION_CREDENTIALS)){
+    delete process.env.GOOGLE_APPLICATION_CREDENTIALS;
+  }
+  const credentialsJson=(process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON || process.env.GCP_SERVICE_ACCOUNT_KEY || '').trim();
+  let credential:any=null;
   if(credentialsJson){
-    const value=credentialsJson.trim();credential=JSON.parse(value.startsWith('{')?value:Buffer.from(value,'base64').toString('utf8'));
-    const directory=fs.mkdtempSync(path.join(os.tmpdir(),'lecturemind-credentials-'));
-    const p=path.join(directory,'credentials.json');fs.writeFileSync(p,JSON.stringify(credential),{mode:0o600});process.env.GOOGLE_APPLICATION_CREDENTIALS=p;
-    process.once('exit',()=>{try{fs.unlinkSync(p);fs.rmdirSync(directory);}catch{}});
-    if(!process.env.GOOGLE_CLOUD_PROJECT)process.env.GOOGLE_CLOUD_PROJECT=credential.project_id;
-  }else if(!process.env.GOOGLE_APPLICATION_CREDENTIALS&&fs.existsSync(path.join(process.cwd(),'service-account-key.json'))){process.env.GOOGLE_APPLICATION_CREDENTIALS=path.join(process.cwd(),'service-account-key.json');}
+    if(credentialsJson.startsWith('{')){
+      try{credential=JSON.parse(credentialsJson);}catch(e){console.warn('Unable to parse JSON credentials from environment.');}
+    }else if(credentialsJson.endsWith('.json')||fs.existsSync(credentialsJson)){
+      if(fs.existsSync(credentialsJson)){
+        try{credential=JSON.parse(fs.readFileSync(credentialsJson,'utf8'));process.env.GOOGLE_APPLICATION_CREDENTIALS=path.resolve(credentialsJson);}catch(e){console.warn('Unable to read credentials file.');}
+      }
+    }else{
+      try{
+        const decoded=Buffer.from(credentialsJson,'base64').toString('utf8').trim();
+        if(decoded.startsWith('{'))credential=JSON.parse(decoded);
+      }catch(e){console.warn('Unable to decode base64 credentials.');}
+    }
+    if(credential){
+      try{
+        const directory=fs.mkdtempSync(path.join(os.tmpdir(),'lecturemind-credentials-'));
+        const p=path.join(directory,'credentials.json');fs.writeFileSync(p,JSON.stringify(credential),{mode:0o600});process.env.GOOGLE_APPLICATION_CREDENTIALS=p;
+        process.once('exit',()=>{try{fs.unlinkSync(p);fs.rmdirSync(directory);}catch{}});
+        if(!process.env.GOOGLE_CLOUD_PROJECT&&credential.project_id)process.env.GOOGLE_CLOUD_PROJECT=credential.project_id;
+      }catch(e){console.warn('Unable to stage credentials file.');}
+    }
+  }else if(!process.env.GOOGLE_APPLICATION_CREDENTIALS&&fs.existsSync(path.join(process.cwd(),'service-account-key.json'))){
+    process.env.GOOGLE_APPLICATION_CREDENTIALS=path.join(process.cwd(),'service-account-key.json');
+  }
   const config=readConfig(production);
   const [{getApps,initializeApp,applicationDefault,cert},{getAuth},{getAppCheck},{getFirestore},{Storage},{GoogleGenAI}]=await Promise.all([import('firebase-admin/app'),import('firebase-admin/auth'),import('firebase-admin/app-check'),import('firebase-admin/firestore'),import('@google-cloud/storage'),import('@google/genai')]);
-  const firebase=getApps().length?getApps()[0]:initializeApp({credential:credential?cert(credential):applicationDefault(),projectId:process.env.VITE_FIREBASE_PROJECT_ID || process.env.GOOGLE_CLOUD_PROJECT});
+  let fbCredential;
+  if(credential)fbCredential=cert(credential);
+  else{try{fbCredential=applicationDefault();}catch{fbCredential=undefined;}}
+  const firebase=getApps().length?getApps()[0]:initializeApp({credential:fbCredential,projectId:process.env.VITE_FIREBASE_PROJECT_ID || process.env.GOOGLE_CLOUD_PROJECT || config.primaryBucket.replace(/\.firebasestorage\.app$/,'')});
   const models=(process.env.VERTEX_MODELS || 'gemini-3.8-flash').split(',').map(m=>m.trim()).filter(Boolean);
-  const client=new GoogleGenAI({vertexai:true,project:process.env.GOOGLE_CLOUD_PROJECT || process.env.VITE_FIREBASE_PROJECT_ID,location:process.env.GOOGLE_CLOUD_LOCATION || 'global',httpOptions:{retryOptions:{attempts:1}}});
+  const client=new GoogleGenAI({vertexai:true,project:process.env.GOOGLE_CLOUD_PROJECT || process.env.VITE_FIREBASE_PROJECT_ID || 'ai-riser-506205',location:process.env.GOOGLE_CLOUD_LOCATION || 'global',httpOptions:{retryOptions:{attempts:1}}});
   const db=getFirestore(firebase),store=createFirestoreStore(db),storage=createMediaStorage(new Storage());
   return {config,store,storage,verifyIdToken:token=>getAuth(firebase).verifyIdToken(token,true),verifyAppCheck:token=>getAppCheck(firebase).verifyToken(token),generate:createGenerator(client,models),startMaintenance:()=>{
     let running=false;

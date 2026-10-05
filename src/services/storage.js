@@ -12,7 +12,11 @@ function uploadDirect(file, session, onProgress, signal) {
     }
     xhr.timeout = 15 * 60 * 1000;
     xhr.upload.onprogress = e => { if (e.lengthComputable) onProgress?.(`Uploading recording (${Math.round(e.loaded / e.total * 100)}%)...`); };
-    xhr.onload = () => { cleanup(); xhr.status >= 200 && xhr.status < 300 ? resolve() : reject(new Error(`Direct upload failed (${xhr.status}).`)); };
+    xhr.onload = () => {
+      cleanup();
+      if (xhr.status >= 200 && xhr.status < 300) resolve();
+      else reject(new Error(`Direct upload failed (${xhr.status}).`));
+    };
     xhr.onerror = () => { cleanup(); reject(new Error('Direct upload unavailable.')); };
     xhr.ontimeout = () => { cleanup(); reject(new Error('Upload timed out.')); };
     xhr.onabort = () => { cleanup(); reject(new DOMException('Cancelled', 'AbortError')); };

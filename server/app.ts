@@ -21,7 +21,13 @@ export function createApp(deps: Dependencies) {
   app.use((req, res, next) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');
     const origin = req.get('origin');
-    if (origin && !config.allowedOrigins.includes(origin)) return res.status(403).json({code:'ORIGIN_DENIED',error:'This origin is not allowed.'});
+    const isAllowed = !origin || config.allowedOrigins.includes(origin) || (() => {
+      try {
+        const host = new URL(origin).hostname;
+        return host === 'localhost' || host === '127.0.0.1' || host === 'lecturemind.ai.studio' || host.endsWith('.ai.studio') || host.endsWith('.run.app');
+      } catch { return false; }
+    })();
+    if (origin && !isAllowed) return res.status(403).json({code:'ORIGIN_DENIED',error:'This origin is not allowed.'});
     if (origin) { res.setHeader('Access-Control-Allow-Origin', origin); res.setHeader('Vary','Origin'); }
     res.setHeader('Access-Control-Allow-Methods','GET, POST, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers','Content-Type, Authorization, X-Firebase-AppCheck, X-Upload-Id, X-Chunk-Index');

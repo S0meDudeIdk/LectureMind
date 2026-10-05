@@ -49,12 +49,42 @@ export async function getAppCheckToken(forceRefresh = false) {
       const providerName = environment.VITE_APP_CHECK_PROVIDER || 'v3';
       if (!['v3', 'enterprise'].includes(providerName)) throw new Error('VITE_APP_CHECK_PROVIDER must be v3 or enterprise.');
       const Provider = providerName === 'enterprise' ? sdk.ReCaptchaEnterpriseProvider : sdk.ReCaptchaV3Provider;
-      appCheck = sdk.initializeAppCheck(app, { provider: new Provider(siteKey), isTokenAutoRefreshEnabled: true });
+      const baseProvider = new Provider(siteKey);
+
+      const rawGetToken = typeof baseProvider.getToken === 'function' ? baseProvider.getToken.bind(baseProvider) : null;
+      let lastFailure = 0;
+      if (rawGetToken) {
+        baseProvider.getToken = async () => {
+          if (Date.now() - lastFailure < 60000) {
+            return { token: '', expireTimeMillis: Date.now() + 60000 };
+          }
+          try {
+            return await rawGetToken();
+          } catch {
+            lastFailure = Date.now();
+            try {
+              const AltProvider = providerName === 'enterprise' ? sdk.ReCaptchaV3Provider : sdk.ReCaptchaEnterpriseProvider;
+              const alt = new AltProvider(siteKey);
+              if (typeof alt.getToken === 'function') {
+                return await alt.getToken();
+              }
+            } catch {}
+            return { token: '', expireTimeMillis: Date.now() + 60000 };
+          }
+        };
+      }
+
+      appCheck = sdk.initializeAppCheck(app, { provider: baseProvider, isTokenAutoRefreshEnabled: false });
       return sdk;
     }).catch((error) => { appCheckPromise = undefined; throw error; });
   }
   const sdk = await appCheckPromise;
-  return (await sdk.getToken(appCheck, forceRefresh)).token;
+  try {
+    const result = await sdk.getToken(appCheck, forceRefresh);
+    return result?.token || null;
+  } catch {
+    return null;
+  }
 }
 
 export { db, storage, auth, appCheck };
