@@ -25,6 +25,8 @@ export function createApp(deps: Dependencies) {
       try {
         if (origin === 'null') return true;
         const host = new URL(origin).hostname;
+        const reqHost = (req.get('x-forwarded-host') || req.get('host') || '').split(':')[0];
+        if (reqHost && host === reqHost) return true;
         return host === 'localhost' ||
           host === '127.0.0.1' ||
           host === 'lecturemind.ai.studio' ||
@@ -33,6 +35,10 @@ export function createApp(deps: Dependencies) {
           host.endsWith('.ai.studio') ||
           host.endsWith('.google.com') ||
           host.endsWith('.googleusercontent.com') ||
+          host.endsWith('.usercontent.goog') ||
+          host.endsWith('.goog') ||
+          host.endsWith('.corp.google.com') ||
+          host.endsWith('.cloud.google.com') ||
           host.endsWith('.run.app') ||
           host.endsWith('.web.app') ||
           host.endsWith('.firebaseapp.com');
@@ -300,7 +306,7 @@ export function createApp(deps: Dependencies) {
         if(signal.aborted)onAbort();else signal.addEventListener('abort',onAbort,{once:true});
       });
       let response;
-      try { response=await Promise.race([deps.generate({uri:`gs://${upload.bucket}/${upload.path}`,mimeType:upload.mimeType,prompt,signal,deadline}),interrupted]); }
+      try { response=await Promise.race([deps.generate({uri:`gs://${upload.bucket}/${upload.path}`,mimeType:upload.mimeType,prompt,signal,deadline,upload}),interrupted]); }
       finally {signal.removeEventListener('abort',onAbort);}
       if(controller.signal.aborted) throw controller.signal.reason;
       const result=parseLectureResponse(response);

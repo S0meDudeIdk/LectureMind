@@ -1,13 +1,21 @@
+import fs from 'node:fs';
+import http from 'node:http';
 import path from 'node:path';
+
+if (process.env.GOOGLE_APPLICATION_CREDENTIALS && !fs.existsSync(process.env.GOOGLE_APPLICATION_CREDENTIALS)) {
+  delete process.env.GOOGLE_APPLICATION_CREDENTIALS;
+}
+
 import { createApp } from './server/app';
 import { createProductionDependencies } from './server/adapters';
 export { createApp } from './server/app';
 
 export async function startServer() {
-  const production = process.argv.includes('--production') || process.env.NODE_ENV === 'production';
-  if (production) process.env.NODE_ENV = 'production';
+  const production = process.argv.includes('--production');
+  process.env.NODE_ENV = production ? 'production' : 'development';
   const dependencies = await createProductionDependencies(production);
   const app = createApp(dependencies);
+  const server = http.createServer(app);
   if (production) {
     const { default: express } = await import('express');
     const publicPath = path.join(process.cwd(), 'dist', 'public');
@@ -15,12 +23,14 @@ export async function startServer() {
     app.get('*all', (_req, res) => res.sendFile(path.join(publicPath, 'index.html')));
   } else {
     const { createServer } = await import('vite');
-    const vite = await createServer({ server: { middlewareMode: true }, appType: 'spa' });
+    const vite = await createServer({ server: { middlewareMode: true, hmr: false, ws: { server } }, appType: 'spa' });
     app.use(vite.middlewares);
   }
-  const port = Number(process.env.PORT || 3000);
+  const portArgIndex = process.argv.indexOf('--port');
+  const portArg = portArgIndex >= 0 ? Number(process.argv[portArgIndex + 1]) : NaN;
+  const port = Number.isInteger(portArg) ? portArg : (production ? Number(process.env.PORT || 3000) : 3000);
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('PORT must be an integer between 1 and 65535.');
-  const server=app.listen(port, '0.0.0.0', () => console.log(`LectureMind listening on port ${port}.`));
+  server.listen(port, '0.0.0.0', () => console.log(`LectureMind listening on port ${port}.`));
   const stopMaintenance=dependencies.startMaintenance?.();
   server.once('close',()=>stopMaintenance?.());
   return server;

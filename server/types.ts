@@ -14,6 +14,7 @@ export interface MediaStorage {
   compose(upload: Upload, chunks: number): Promise<void>;
   delete(upload: Upload): Promise<void>;
   deleteLecture(bucket: string, prefix: string): Promise<void>;
+  readBuffer?(upload: Upload): Promise<Buffer>;
 }
 export interface AppConfig {
   production: boolean; allowedOrigins: string[]; primaryBucket: string; guestBucket: string;
@@ -25,7 +26,7 @@ export interface Dependencies {
   store: Store; storage: MediaStorage; config: AppConfig;
   verifyIdToken(token: string): Promise<{uid: string; firebase?: {sign_in_provider?: string}}>;
   verifyAppCheck(token: string): Promise<unknown>;
-  generate(input: {uri: string; mimeType: string; prompt: string; signal: AbortSignal; deadline: number}): Promise<any>;
+  generate(input: {uri: string; mimeType: string; prompt: string; signal: AbortSignal; deadline: number; upload?: Upload}): Promise<any>;
   now?: () => number;
   startMaintenance?: () => () => void;
 }

@@ -17,7 +17,7 @@ export async function generateLectureContent(rawFile, onProgress, options = {}) 
       uploadId: options.uploadId, jobId: options.jobId,
       duration: options.duration || 0,
       isVideo: options.originalIsVideo ?? rawFile?.type?.startsWith('video/'),
-      promptText: 'Produce a hierarchical Markdown mindmap, comprehensive study notes with LaTeX, and a chronological verbatim transcript of this recording. Use ===MINDMAP_START=== and ===MINDMAP_END===, ===TRANSCRIPT_START=== and ===TRANSCRIPT_END===, ===NOTES_START=== and ===NOTES_END===. Transcript must be a JSON array of {startTime:"HH:MM:SS",textBlock:"spoken words"}. Do not fabricate unheard speech. Transcribe the whole recording, not a summary.',
+      promptText: 'Produce a hierarchical Markdown mindmap, comprehensive study notes with LaTeX, and a chronological verbatim transcript of this recording. Use ===MINDMAP_START=== and ===MINDMAP_END===, ===NOTES_START=== and ===NOTES_END===, ===TRANSCRIPT_START=== and ===TRANSCRIPT_END=== in that order. For the transcript, output a valid JSON array of {startTime:"HH:MM:SS",textBlock:"spoken words"} in strictly ascending chronological order starting from 00:00:00, grouping speech into natural 15 to 30 second segments so the entire lecture fits within output limits. Do not fabricate unheard speech.',
     }, { signal: options.signal });
     return validateLectureContent(data);
   } finally { clearInterval(timer); }
