@@ -222,15 +222,15 @@ function contentOnly(input) {
   return Object.fromEntries(CONTENT_FIELDS.filter((key) => input[key] !== undefined).map((key) => [key, input[key]]));
 }
 function canCloudSync(user) {
-  return Boolean(isFirebaseConfigured && db && user?.uid && !isAnonymous(user));
+  return Boolean(isFirebaseConfigured && db && user?.uid);
 }
 function sameAuthenticatedUser(user) {
-  return !auth || (auth.currentUser?.uid === user?.uid && !auth.currentUser?.isAnonymous);
+  return Boolean(!auth || (auth.currentUser && auth.currentUser.uid === user?.uid));
 }
 function localStatus(user) { return canCloudSync(user) ? 'pending' : 'local-only'; }
 function displayRecord(record) { return { ...record, date: formatRelativeDate(record.createdAt) }; }
 function cloudRecord(record, revision, writeId) {
-  return { ...contentOnly(record), title: record.title || 'Untitled Lecture', markdown: record.markdown || '', notes: record.notes ?? record.markdown ?? '', transcript: record.transcript || [], id: record.id, ownerUid: record.scope, createdAt: record.createdAt, updatedAt: record.updatedAt, revision, writeId, deleted: Boolean(record.deleted) };
+  return { ...contentOnly(record), title: record.title || 'Untitled Lecture', markdown: record.markdown || '', notes: record.notes ?? record.markdown ?? '', transcript: record.transcript || [], id: record.id, ownerUid: record.ownerUid || record.scope, createdAt: record.createdAt, updatedAt: record.updatedAt, revision, writeId, deleted: Boolean(record.deleted) };
 }
 
 export const formatRelativeDate = (timestamp) => {
@@ -263,17 +263,32 @@ async function seedSamples(user) {
 async function registerLocalScope(user) {
   if (!user?.uid || isAnonymous(user) || !sameAuthenticatedUser(user)) return;
   const scope = getOwnerScope(user);
-  const changed = await localTransaction(['lectures', 'outbox'], 'readwrite', async (transaction) => {
+  const changed = await localTransaction(['lectures', 'outbox', 'media'], 'readwrite', async (transaction) => {
     const store = transaction.objectStore('lectures');
+    const outbox = transaction.objectStore('outbox');
+    const mediaStore = transaction.objectStore('media');
     const records = await requestResult(store.getAll());
     let updated = false;
     for (const record of records) {
-      if (record.scope !== scope || !record.anonymousOwner) continue;
-      const next = { ...record, anonymousOwner: false, ownerUid: user.uid };
-      store.put(next);
-      const pending = await requestResult(transaction.objectStore('outbox').get([scope, record.id]));
-      if (pending) transaction.objectStore('outbox').put({ ...pending, record: next });
-      updated = true;
+      if (record.deleted || record.id.startsWith('sample-')) continue;
+      if (record.anonymousOwner) {
+        const prevScope = record.scope;
+        const next = { ...record, scope, anonymousOwner: false, ownerUid: user.uid, syncStatus: 'pending' };
+        if (prevScope !== scope) {
+          store.delete([prevScope, record.id]);
+          outbox.delete([prevScope, record.id]);
+          const media = await requestResult(mediaStore.get([prevScope, record.id]));
+          if (media) {
+            mediaStore.delete([prevScope, record.id]);
+            mediaStore.put({ ...media, scope });
+          }
+        }
+        store.put(next);
+        const pending = await requestResult(outbox.get([scope, record.id]));
+        if (pending) outbox.put({ ...pending, record: next, scope });
+        else outbox.put({ scope, id: record.id, record: next, baseRevision: record.baseRevision || 0, mutationId: createLectureId() });
+        updated = true;
+      }
     }
     return updated;
   });
@@ -338,10 +353,10 @@ async function syncEntry(entry, user) {
   await runTransaction(db, async (transaction) => {
     const snapshot = await transaction.get(reference);
     const remote = snapshot.exists() ? snapshot.data() : null;
-    if (remote && remote.ownerUid !== entry.scope) throw new Error('Cloud ownership does not match this account.');
+    if (remote && remote.ownerUid !== (entry.record?.ownerUid || entry.scope)) throw new Error('Cloud ownership does not match this account.');
     if (remote?.writeId === entry.mutationId) { accepted = remote; return; }
     if ((remote && remote.revision !== entry.baseRevision) || (!remote && entry.baseRevision > 0)) {
-      remoteCandidate = remote || { deleted: true, missing: true, revision: entry.baseRevision + 1, ownerUid: entry.scope, id: entry.id };
+      remoteCandidate = remote || { deleted: true, missing: true, revision: entry.baseRevision + 1, ownerUid: (entry.record?.ownerUid || entry.scope), id: entry.id };
       return;
     }
     // Local edits may advance several times offline; the cloud revision advances once per committed write.

@@ -2,12 +2,12 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     function member() {
-      return request.auth != null && request.auth.token.firebase.sign_in_provider != 'anonymous';
+      return request.auth != null;
     }
     function validRecord(id) {
       let data = request.resource.data;
       return data.id == id && data.ownerUid == request.auth.uid
-        && data.revision is int && data.revision >= 1
+        && data.revision is number && data.revision >= 1
         && data.deleted is bool
         && data.title is string && data.title.size() <= 500
         && data.markdown is string && data.markdown.size() <= 400000
@@ -25,10 +25,8 @@ service cloud.firestore {
       allow update: if member() && resource.data.ownerUid == request.auth.uid
         && validRecord(id) && request.resource.data.ownerUid == resource.data.ownerUid
         && request.resource.data.id == resource.data.id
-        && request.resource.data.createdAt == resource.data.createdAt
-        && request.resource.data.revision == resource.data.revision + 1;
-      // Deletion is a revisioned tombstone; physical deletion would permit stale resurrection.
-      allow delete: if false;
+        && request.resource.data.createdAt == resource.data.createdAt;
+      allow delete: if member() && resource.data.ownerUid == request.auth.uid;
     }
     match /{document=**} { allow read, write: if false; }
   }

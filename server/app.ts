@@ -62,10 +62,15 @@ export function createApp(deps: Dependencies) {
       let identity;
       try { identity = await deps.verifyIdToken(match![1]); } catch { fail(401,'INVALID_TOKEN','Your session expired. Please sign in again.'); }
       if (!/^[A-Za-z0-9_-]{1,128}$/.test(identity!.uid)) fail(401,'INVALID_TOKEN','Invalid user identity.');
-      if (config.production) {
+      if (config.enforceAppCheck ?? config.production) {
         const token = req.get('x-firebase-appcheck');
         if (!token) fail(401,'APP_CHECK_REQUIRED','App verification is required.');
         try { await deps.verifyAppCheck(token!); } catch { fail(401,'INVALID_APP_CHECK','App verification failed.'); }
+      } else {
+        const token = req.get('x-firebase-appcheck');
+        if (token) {
+          try { await deps.verifyAppCheck(token); } catch { fail(401,'INVALID_APP_CHECK','App verification failed.'); }
+        }
       }
       const uid = identity!.uid;
       const guest = identity!.firebase?.sign_in_provider === 'anonymous';

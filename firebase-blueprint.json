@@ -1,0 +1,61 @@
+{
+  "entities": {
+    "Mindmap": {
+      "title": "Mindmap",
+      "description": "Interactive mindmap, study notes, and verbatim transcript record owned by a user.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique lecture ID."
+        },
+        "ownerUid": {
+          "type": "string",
+          "description": "Firebase user ID who owns this mindmap."
+        },
+        "revision": {
+          "type": "number",
+          "description": "Sequential revision number."
+        },
+        "deleted": {
+          "type": "boolean",
+          "description": "Tombstone flag for deleted mindmaps."
+        },
+        "title": {
+          "type": "string",
+          "description": "Lecture title.",
+          "maxLength": 500
+        },
+        "markdown": {
+          "type": "string",
+          "description": "Hierarchical mindmap markdown string.",
+          "maxLength": 400000
+        },
+        "notes": {
+          "type": "string",
+          "description": "Comprehensive formatted lecture notes.",
+          "maxLength": 400000
+        },
+        "transcript": {
+          "type": "array",
+          "description": "Array of verbatim transcript segments with timestamps."
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "ISO timestamp of creation."
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "ISO timestamp of last modification."
+        }
+      },
+      "required": ["id", "ownerUid", "revision", "deleted", "title", "markdown", "notes", "createdAt", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/mindmaps/{id}": {
+      "schema": "Mindmap",
+      "description": "Collection of user-owned mindmaps, notes, and transcripts."
+    }
+  }
+}

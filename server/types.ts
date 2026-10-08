@@ -21,6 +21,7 @@ export interface AppConfig {
   dailyGuestLimit: number; dailyMemberLimit: number; maxConcurrent: number; maxPerUidConcurrent: number;
   jobTimeoutMs: number; uploadLifetimeMs: number; readLifetimeMs: number;
   abuseSecret: string; guestIpDailyLimit: number; requestsPerMinute: number; trustProxy: false | number;
+  enforceAppCheck?: boolean;
 }
 export interface Dependencies {
   store: Store; storage: MediaStorage; config: AppConfig;

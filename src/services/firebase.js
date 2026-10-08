@@ -1,22 +1,27 @@
 import { initializeApp, getApps, getApp, setLogLevel } from 'firebase/app';
 import { initializeFirestore, getFirestore, connectFirestoreEmulator } from 'firebase/firestore';
 import { getAuth, connectAuthEmulator } from 'firebase/auth';
+import appletConfig from '../../firebase-applet-config.json';
 
 try { setLogLevel('error'); } catch {}
 
 const environment = import.meta.env;
-const authDomain = environment.VITE_FIREBASE_AUTH_DOMAIN?.trim() || '';
+const hasEnvConfig = Boolean(environment.VITE_FIREBASE_API_KEY || environment.VITE_FIREBASE_AUTH_DOMAIN || environment.VITE_FIREBASE_PROJECT_ID);
+const authDomain = environment.VITE_FIREBASE_AUTH_DOMAIN?.trim() || (!hasEnvConfig ? appletConfig?.authDomain?.trim() : '') || '';
 const domainProject = /^(.*?)\.(?:firebaseapp\.com|web\.app)$/.exec(authDomain)?.[1] || '';
-const projectId = environment.VITE_FIREBASE_PROJECT_ID?.trim() || domainProject;
-const configuredBucket = environment.VITE_FIREBASE_STORAGE_BUCKET?.trim() || '';
+const projectId = environment.VITE_FIREBASE_PROJECT_ID?.trim() || domainProject || (!hasEnvConfig ? appletConfig?.projectId?.trim() : '');
+const configuredBucket = environment.VITE_FIREBASE_STORAGE_BUCKET?.trim() || (!hasEnvConfig ? appletConfig?.storageBucket?.trim() : '') || '';
 const storageBucket = configuredBucket.replace(/^gs:\/\//, '').replace(/\/$/, '');
+const firestoreDatabaseId = environment.VITE_FIRESTORE_DATABASE_ID?.trim() || appletConfig?.firestoreDatabaseId?.trim() || undefined;
+
 const firebaseConfig = {
-  apiKey: environment.VITE_FIREBASE_API_KEY?.trim(),
+  apiKey: environment.VITE_FIREBASE_API_KEY?.trim() || (!hasEnvConfig ? appletConfig?.apiKey?.trim() : undefined),
   authDomain: authDomain || (projectId ? `${projectId}.firebaseapp.com` : undefined),
-  projectId, storageBucket: storageBucket || undefined,
-  messagingSenderId: environment.VITE_FIREBASE_MESSAGING_SENDER_ID?.trim(),
-  appId: environment.VITE_FIREBASE_APP_ID?.trim(),
-  measurementId: environment.VITE_FIREBASE_MEASUREMENT_ID?.trim(),
+  projectId,
+  storageBucket: storageBucket || undefined,
+  messagingSenderId: environment.VITE_FIREBASE_MESSAGING_SENDER_ID?.trim() || (!hasEnvConfig ? appletConfig?.messagingSenderId?.trim() : undefined),
+  appId: environment.VITE_FIREBASE_APP_ID?.trim() || (!hasEnvConfig ? appletConfig?.appId?.trim() : undefined),
+  measurementId: environment.VITE_FIREBASE_MEASUREMENT_ID?.trim() || (!hasEnvConfig ? appletConfig?.measurementId?.trim() : undefined),
 };
 
 export const isFirebaseConfigured = Boolean(firebaseConfig.apiKey && projectId);
@@ -31,10 +36,16 @@ let appCheckPromise;
 
 if (isFirebaseConfigured) {
   app = getApps().length ? getApp() : initializeApp(firebaseConfig);
-  try { db = initializeFirestore(app, { experimentalAutoDetectLongPolling: true }); }
-  catch (error) { if (error.code !== 'failed-precondition') throw error; db = getFirestore(app); }
+  try {
+    db = firestoreDatabaseId
+      ? initializeFirestore(app, { experimentalAutoDetectLongPolling: true }, firestoreDatabaseId)
+      : initializeFirestore(app, { experimentalAutoDetectLongPolling: true });
+  } catch (error) {
+    if (error.code !== 'failed-precondition') throw error;
+    db = firestoreDatabaseId ? getFirestore(app, firestoreDatabaseId) : getFirestore(app);
+  }
   auth = getAuth(app);
-  // Recording transport uses the authenticated backend, not the browser Storage SDK.
+
   if (useFirebaseEmulators) {
     const host = environment.VITE_FIREBASE_EMULATOR_HOST || '127.0.0.1';
     connectAuthEmulator(auth, `http://${host}:${environment.VITE_FIREBASE_AUTH_EMULATOR_PORT || '9099'}`, { disableWarnings: true });

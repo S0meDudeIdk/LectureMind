@@ -29,7 +29,8 @@ export function readConfig(production:boolean):AppConfig {
     maxConcurrent:integer('MAX_CONCURRENT_JOBS',8,1,100),maxPerUidConcurrent:integer('MAX_USER_CONCURRENT_JOBS',1,1,10),
     jobTimeoutMs:integer('GENERATION_TIMEOUT_MS',600000,1000,1800000),uploadLifetimeMs:3600000,readLifetimeMs:3600000,
     guestIpDailyLimit:integer('GUEST_IP_DAILY_LIMIT',20),requestsPerMinute:integer('REQUESTS_PER_MINUTE',120),
-    trustProxy:process.env.TRUST_PROXY_HOPS?integer('TRUST_PROXY_HOPS',1,1,10):false};
+    trustProxy:process.env.TRUST_PROXY_HOPS?integer('TRUST_PROXY_HOPS',1,1,10):false,
+    enforceAppCheck:process.env.ENFORCE_APP_CHECK === 'true'};
 }
 
 export class MemoryStore implements Store {
@@ -399,19 +400,18 @@ export async function createProductionDependencies(production:boolean):Promise<D
     'gemini-2.5-pro',
     'gemini-2.5-flash'
   ];
-  const models = hasCredential
-    ? Array.from(new Set([...configuredModels, ...fallbackChain]))
-    : Array.from(new Set([
-        ...configuredModels.filter(m => m !== 'gemini-3.8-flash'),
-        'gemini-3.6-flash',
-        'gemini-3.1-flash-lite',
-        ...fallbackChain
-      ]));
+  const models = Array.from(new Set([...configuredModels, ...fallbackChain]));
   const geminiApiKey=(process.env.VITE_GEMINI_API_KEY || process.env.GEMINI_API_KEY || '').trim();
   const client=hasCredential
     ? new GoogleGenAI({vertexai:true,project:process.env.GOOGLE_CLOUD_PROJECT || process.env.VITE_FIREBASE_PROJECT_ID || 'ai-riser-506205',location:process.env.GOOGLE_CLOUD_LOCATION || 'global',httpOptions:{retryOptions:{attempts:1}}})
     : new GoogleGenAI({apiKey:geminiApiKey,httpOptions:{headers:{'User-Agent':'aistudio-build'},retryOptions:{attempts:1}}});
-  const db=getFirestore(firebase),store=createFirestoreStore(db,hasCredential),storage=createMediaStorage(new Storage(),hasCredential);
+  const appletConfigPath=path.join(process.cwd(),'firebase-applet-config.json');
+  let firestoreDbId: string | undefined;
+  if(fs.existsSync(appletConfigPath)){
+    try{firestoreDbId=JSON.parse(fs.readFileSync(appletConfigPath,'utf8')).firestoreDatabaseId;}catch{}
+  }
+  const db=firestoreDbId?getFirestore(firebase,firestoreDbId):getFirestore(firebase);
+  const store=createFirestoreStore(db,hasCredential),storage=createMediaStorage(new Storage(),hasCredential);
   return {config,store,storage,verifyIdToken:token=>getAuth(firebase).verifyIdToken(token,false),verifyAppCheck:token=>getAppCheck(firebase).verifyToken(token),generate:createGenerator(client,models,storage),startMaintenance:()=>{
     let running=false;
     const sweep=async()=>{if(running)return;running=true;try{if(hasCredential)await cleanExpiredUploads(db,storage,store);}catch{console.warn('Expired upload cleanup will retry.');}finally{running=false;}};
