@@ -43,3 +43,5 @@ coverage/
 .tmp/
 
 docs/
+
+firebase-applet-config.json

@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
+import { readInlineServiceAccount } from '../server/credentials';
 import { createApp, CHUNK_SIZE } from '../server/app';
 import { createMediaStorage, createGenerator, cleanExpiredUploads, createFirestoreStore } from '../server/adapters';
 import { parseLectureResponse } from '../server/parser';
@@ -203,4 +204,21 @@ test('production Firestore adapter attaches timestamp TTL and retains source loo
   const store=createFirestoreStore(db);
   await store.transaction(async tx=>{tx.set('lmJobs/job',{createdAt:Date.now()});tx.set('lmUploads/source',{status:'ready',expiresAt:Date.now()});tx.set('lmUploads/temp',{status:'uploading',expiresAt:Date.now()});});
   assert.ok(writes[0].value.deleteAfter instanceof Date);assert.equal(writes[1].value.deleteAfter,null);assert.equal(writes[1].value.cleanupAfter,null);assert.ok(writes[2].value.cleanupAfter instanceof Date);
+});
+
+
+test('inline service-account JSON and base64 parse without a credential file',()=>{
+  const {privateKey}=crypto.generateKeyPairSync('rsa',{modulusLength:2048});
+  const credential={type:'service_account',project_id:'demo-lecturemind',client_email:'fixture@demo-lecturemind.iam.gserviceaccount.com',private_key:privateKey.export({type:'pkcs8',format:'pem'}).toString()};
+  const json=JSON.stringify(credential);
+  assert.deepEqual(readInlineServiceAccount({GOOGLE_APPLICATION_CREDENTIALS_JSON:json}),credential);
+  assert.deepEqual(readInlineServiceAccount({GCP_SERVICE_ACCOUNT_KEY:Buffer.from(json).toString('base64')}),credential);
+  assert.equal(readInlineServiceAccount({}),null);
+});
+test('invalid explicit credentials fail with a redacted error instead of falling back',()=>{
+  for(const value of ['service-account-key.json','secret-invalid-json','e30=',JSON.stringify({type:'service_account',private_key:'secret-invalid-key'})]){
+    assert.throws(()=>readInlineServiceAccount({GOOGLE_APPLICATION_CREDENTIALS_JSON:value}),error=>{
+      assert(!error.message.includes(value));return /Invalid inline service-account/.test(error.message);
+    });
+  }
 });

@@ -1,7 +1,7 @@
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { readInlineServiceAccount } from './credentials';
 import { ApiError, fail } from './errors';
 import { CHUNK_SIZE } from './app';
 import type { AppConfig, Dependencies, Store, MediaStorage, Upload } from './types';
@@ -350,36 +350,13 @@ export function createGenerator(client:any,models:string[],storage?:MediaStorage
 export async function createProductionDependencies(production:boolean):Promise<Dependencies> {
   // This function runs only at explicit server startup, never when imported by tests.
   for(const name of ['.env','.env.local']){const p=path.join(process.cwd(),name);if(fs.existsSync(p)&&(process as any).loadEnvFile)(process as any).loadEnvFile(p);}
-  if(process.env.GOOGLE_APPLICATION_CREDENTIALS&&!fs.existsSync(process.env.GOOGLE_APPLICATION_CREDENTIALS)){
-    delete process.env.GOOGLE_APPLICATION_CREDENTIALS;
-  }
-  const credentialsJson=(process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON || process.env.GCP_SERVICE_ACCOUNT_KEY || '').trim();
-  let credential:any=null;
-  if(credentialsJson){
-    if(credentialsJson.startsWith('{')){
-      try{credential=JSON.parse(credentialsJson);}catch(e){console.warn('Unable to parse JSON credentials from environment.');}
-    }else if(credentialsJson.endsWith('.json')||fs.existsSync(credentialsJson)){
-      if(fs.existsSync(credentialsJson)){
-        try{credential=JSON.parse(fs.readFileSync(credentialsJson,'utf8'));process.env.GOOGLE_APPLICATION_CREDENTIALS=path.resolve(credentialsJson);}catch(e){console.warn('Unable to read credentials file.');}
-      }
-    }else{
-      try{
-        const decoded=Buffer.from(credentialsJson,'base64').toString('utf8').trim();
-        if(decoded.startsWith('{'))credential=JSON.parse(decoded);
-      }catch(e){console.warn('Unable to decode base64 credentials.');}
-    }
-    if(credential){
-      try{
-        const directory=fs.mkdtempSync(path.join(os.tmpdir(),'lecturemind-credentials-'));
-        const p=path.join(directory,'credentials.json');fs.writeFileSync(p,JSON.stringify(credential),{mode:0o600});process.env.GOOGLE_APPLICATION_CREDENTIALS=p;
-        process.once('exit',()=>{try{fs.unlinkSync(p);fs.rmdirSync(directory);}catch{}});
-        if(!process.env.GOOGLE_CLOUD_PROJECT&&credential.project_id)process.env.GOOGLE_CLOUD_PROJECT=credential.project_id;
-      }catch(e){console.warn('Unable to stage credentials file.');}
-    }
-  }else if(!process.env.GOOGLE_APPLICATION_CREDENTIALS&&fs.existsSync(path.join(process.cwd(),'service-account-key.json'))){
+  const credential=readInlineServiceAccount();
+  if(credential&&!process.env.GOOGLE_CLOUD_PROJECT)process.env.GOOGLE_CLOUD_PROJECT=credential.project_id;
+  if(!credential&&!process.env.GOOGLE_APPLICATION_CREDENTIALS&&fs.existsSync(path.join(process.cwd(),'service-account-key.json'))){
     process.env.GOOGLE_APPLICATION_CREDENTIALS=path.join(process.cwd(),'service-account-key.json');
   }
-  const hasCredential = Boolean(credential);
+  // ADC (including a Cloud Run runtime identity) is valid without an inline key.
+  const hasCredential = true;
   const config=readConfig(production);
   const [{getApps,initializeApp,applicationDefault,cert},{getAuth},{getAppCheck},{getFirestore},{Storage},{GoogleGenAI}]=await Promise.all([import('firebase-admin/app'),import('firebase-admin/auth'),import('firebase-admin/app-check'),import('firebase-admin/firestore'),import('@google-cloud/storage'),import('@google/genai')]);
   let fbCredential;
@@ -401,17 +378,14 @@ export async function createProductionDependencies(production:boolean):Promise<D
     'gemini-2.5-flash'
   ];
   const models = Array.from(new Set([...configuredModels, ...fallbackChain]));
-  const geminiApiKey=(process.env.VITE_GEMINI_API_KEY || process.env.GEMINI_API_KEY || '').trim();
-  const client=hasCredential
-    ? new GoogleGenAI({vertexai:true,project:process.env.GOOGLE_CLOUD_PROJECT || process.env.VITE_FIREBASE_PROJECT_ID || 'ai-riser-506205',location:process.env.GOOGLE_CLOUD_LOCATION || 'global',httpOptions:{retryOptions:{attempts:1}}})
+  const geminiApiKey=(process.env.GEMINI_API_KEY || '').trim();
+  const useVertex=Boolean(credential || process.env.GOOGLE_APPLICATION_CREDENTIALS || process.env.K_SERVICE || !geminiApiKey);
+  const client=useVertex
+    ? new GoogleGenAI({vertexai:true,project:process.env.GOOGLE_CLOUD_PROJECT || process.env.VITE_FIREBASE_PROJECT_ID || 'ai-riser-506205',location:process.env.GOOGLE_CLOUD_LOCATION || 'global',googleAuthOptions:credential?{credentials:credential}:undefined,httpOptions:{retryOptions:{attempts:1}}})
     : new GoogleGenAI({apiKey:geminiApiKey,httpOptions:{headers:{'User-Agent':'aistudio-build'},retryOptions:{attempts:1}}});
-  const appletConfigPath=path.join(process.cwd(),'firebase-applet-config.json');
-  let firestoreDbId: string | undefined;
-  if(fs.existsSync(appletConfigPath)){
-    try{firestoreDbId=JSON.parse(fs.readFileSync(appletConfigPath,'utf8')).firestoreDatabaseId;}catch{}
-  }
+  const firestoreDbId=process.env.FIRESTORE_DATABASE_ID?.trim() || process.env.VITE_FIRESTORE_DATABASE_ID?.trim() || undefined;
   const db=firestoreDbId?getFirestore(firebase,firestoreDbId):getFirestore(firebase);
-  const store=createFirestoreStore(db,hasCredential),storage=createMediaStorage(new Storage(),hasCredential);
+  const store=createFirestoreStore(db,hasCredential),storage=createMediaStorage(new Storage(credential?{projectId:credential.project_id,credentials:credential}:{}),hasCredential);
   return {config,store,storage,verifyIdToken:token=>getAuth(firebase).verifyIdToken(token,false),verifyAppCheck:token=>getAppCheck(firebase).verifyToken(token),generate:createGenerator(client,models,storage),startMaintenance:()=>{
     let running=false;
     const sweep=async()=>{if(running)return;running=true;try{if(hasCredential)await cleanExpiredUploads(db,storage,store);}catch{console.warn('Expired upload cleanup will retry.');}finally{running=false;}};

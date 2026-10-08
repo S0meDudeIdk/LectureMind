@@ -15,7 +15,7 @@ async function loadConfiguration(environment) {
       builder.onLoad({ filter: /.*/, namespace: 'mock' }, () => ({ contents: `
         const state=globalThis.__configurationTest;
         export function initializeApp(config){state.config=config;return{config};} export const getApps=()=>[]; export const getApp=()=>({}); export const setLogLevel=()=>{};
-        export const initializeFirestore=()=>({}); export const getFirestore=()=>({}); export const getAuth=()=>({}); export const getStorage=()=>({});
+        export const initializeFirestore=(_app,_options,id)=>{state.databaseId=id;return{};}; export const getFirestore=(_app,id)=>{state.databaseId=id;return{};}; export const getAuth=()=>({}); export const getStorage=()=>({});
         export const connectAuthEmulator=(_auth,url)=>state.connections.push(['auth',url]);
         export const connectFirestoreEmulator=(_db,host,port)=>state.connections.push(['firestore',host,port]);
         export const connectStorageEmulator=(_db,host,port)=>state.connections.push(['storage',host,port]);
@@ -74,4 +74,14 @@ test('Enterprise site keys use the Enterprise provider', async () => {
 test('unknown App Check provider fails instead of silently using the wrong attestation', async () => {
   const { api } = await loadConfiguration({ VITE_FIREBASE_API_KEY: 'fixture', VITE_FIREBASE_PROJECT_ID: 'project', VITE_RECAPTCHA_SITE_KEY: 'key', VITE_APP_CHECK_PROVIDER: 'invalid' });
   await assert.rejects(api.getAppCheckToken(), /must be v3 or enterprise/);
+});
+
+
+test('missing environment configuration leaves Firebase disabled without a JSON fallback',async()=>{
+  const {state,api}=await loadConfiguration({});
+  assert.equal(state.config,null);assert.equal(api.isFirebaseConfigured,false);
+});
+test('named Firestore database comes from the environment',async()=>{
+  const {state}=await loadConfiguration({VITE_FIREBASE_API_KEY:'fixture',VITE_FIREBASE_PROJECT_ID:'project',VITE_FIRESTORE_DATABASE_ID:'named-fixture'});
+  assert.equal(state.databaseId,'named-fixture');
 });

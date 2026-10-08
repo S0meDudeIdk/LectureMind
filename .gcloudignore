@@ -16,3 +16,5 @@ service-account-key.json
 .codex/
 .agents/
 .aws/
+
+firebase-applet-config.json

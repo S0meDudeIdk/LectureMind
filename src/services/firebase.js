@@ -1,27 +1,25 @@
 import { initializeApp, getApps, getApp, setLogLevel } from 'firebase/app';
 import { initializeFirestore, getFirestore, connectFirestoreEmulator } from 'firebase/firestore';
 import { getAuth, connectAuthEmulator } from 'firebase/auth';
-import appletConfig from '../../firebase-applet-config.json';
 
 try { setLogLevel('error'); } catch {}
 
 const environment = import.meta.env;
-const hasEnvConfig = Boolean(environment.VITE_FIREBASE_API_KEY || environment.VITE_FIREBASE_AUTH_DOMAIN || environment.VITE_FIREBASE_PROJECT_ID);
-const authDomain = environment.VITE_FIREBASE_AUTH_DOMAIN?.trim() || (!hasEnvConfig ? appletConfig?.authDomain?.trim() : '') || '';
+const authDomain = environment.VITE_FIREBASE_AUTH_DOMAIN?.trim() || '';
 const domainProject = /^(.*?)\.(?:firebaseapp\.com|web\.app)$/.exec(authDomain)?.[1] || '';
-const projectId = environment.VITE_FIREBASE_PROJECT_ID?.trim() || domainProject || (!hasEnvConfig ? appletConfig?.projectId?.trim() : '');
-const configuredBucket = environment.VITE_FIREBASE_STORAGE_BUCKET?.trim() || (!hasEnvConfig ? appletConfig?.storageBucket?.trim() : '') || '';
+const projectId = environment.VITE_FIREBASE_PROJECT_ID?.trim() || domainProject;
+const configuredBucket = environment.VITE_FIREBASE_STORAGE_BUCKET?.trim() || '';
 const storageBucket = configuredBucket.replace(/^gs:\/\//, '').replace(/\/$/, '');
-const firestoreDatabaseId = environment.VITE_FIRESTORE_DATABASE_ID?.trim() || appletConfig?.firestoreDatabaseId?.trim() || undefined;
+const firestoreDatabaseId = environment.VITE_FIRESTORE_DATABASE_ID?.trim() || undefined;
 
 const firebaseConfig = {
-  apiKey: environment.VITE_FIREBASE_API_KEY?.trim() || (!hasEnvConfig ? appletConfig?.apiKey?.trim() : undefined),
+  apiKey: environment.VITE_FIREBASE_API_KEY?.trim(),
   authDomain: authDomain || (projectId ? `${projectId}.firebaseapp.com` : undefined),
   projectId,
   storageBucket: storageBucket || undefined,
-  messagingSenderId: environment.VITE_FIREBASE_MESSAGING_SENDER_ID?.trim() || (!hasEnvConfig ? appletConfig?.messagingSenderId?.trim() : undefined),
-  appId: environment.VITE_FIREBASE_APP_ID?.trim() || (!hasEnvConfig ? appletConfig?.appId?.trim() : undefined),
-  measurementId: environment.VITE_FIREBASE_MEASUREMENT_ID?.trim() || (!hasEnvConfig ? appletConfig?.measurementId?.trim() : undefined),
+  messagingSenderId: environment.VITE_FIREBASE_MESSAGING_SENDER_ID?.trim(),
+  appId: environment.VITE_FIREBASE_APP_ID?.trim(),
+  measurementId: environment.VITE_FIREBASE_MEASUREMENT_ID?.trim(),
 };
 
 export const isFirebaseConfigured = Boolean(firebaseConfig.apiKey && projectId);
